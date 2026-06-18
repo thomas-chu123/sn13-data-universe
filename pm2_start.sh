@@ -1,0 +1,1 @@
+pm2 start python --name sn13-miner -- ./neurons/miner.py --wallet.name skynet --wallet.hotkey skynet
