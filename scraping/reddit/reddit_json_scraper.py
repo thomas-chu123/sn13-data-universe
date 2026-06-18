@@ -44,6 +44,43 @@ class RedditJsonScraper(Scraper):
     
     # Request counter for User-Agent rotation
     _request_count = 0
+    
+    # Community credibility tiers for weighted scoring (Phase 3 enhancement)
+    COMMUNITY_TIERS = {
+        # Tier 1 (weight 1.0): Core crypto communities, highest credibility
+        "tier1": {
+            "weight": 1.0,
+            "communities": {"bittensor", "bitcoin", "cryptocurrency"},
+        },
+        # Tier 2 (weight 0.8): Related crypto communities, high credibility
+        "tier2": {
+            "weight": 0.8,
+            "communities": {
+                "cryptomarkets", "btc", "ethereum", "ethtrader", "defi", 
+                "web3", "blockchain", "altcoin", "cryptotechnology", 
+                "blockchaintechnology", "smartcontracts", "cryptonews", 
+                "bitcoinnews", "cryptoprices", "nft"
+            },
+        },
+        # Tier 3 (weight 0.6): Broader finance/tech communities, medium credibility
+        "tier3": {
+            "weight": 0.6,
+            "communities": {
+                "solana", "cardano", "polkadot", "monero", "filecoin",
+                "dogecoin", "litecoin", "ripple", "binance", "kraken",
+                "coinbase", "trading", "bitcoinbeginners", "cryptojobs"
+            },
+        },
+        # Tier 4 (weight 0.4): General finance/tech, lower relevance
+        "tier4": {
+            "weight": 0.4,
+            "communities": {
+                "wallstreetbets", "stocks", "investing", "finance", 
+                "economics", "technology", "programming", "datascience", 
+                "machinelearning", "cybersecurity"
+            },
+        },
+    }
 
     def _get_headers(self):
         """Get headers with rotating User-Agent to avoid 403 blocking"""
@@ -55,6 +92,27 @@ class RedditJsonScraper(Scraper):
             "Accept-Language": "en-US,en;q=0.9",
             "Cache-Control": "no-cache",
         }
+
+    def _get_community_tier(self, subreddit_name: str) -> tuple:
+        """Get community tier and credibility weight for a subreddit.
+        
+        Args:
+            subreddit_name: Name of the subreddit (without r/ prefix)
+            
+        Returns:
+            Tuple of (tier_name, weight) where weight is 0.4-1.0
+        """
+        subreddit_lower = subreddit_name.lower().strip("r/")
+        
+        for tier_name, tier_data in self.COMMUNITY_TIERS.items():
+            if subreddit_lower in tier_data["communities"]:
+                weight = tier_data["weight"]
+                bt.logging.trace(f"Community r/{subreddit_lower}: {tier_name} (weight={weight})")
+                return tier_name, weight
+        
+        # Unknown community, assign to tier 4 (lowest)
+        bt.logging.warning(f"Unknown community r/{subreddit_lower}: assigning tier4 (weight=0.4)")
+        return "tier4", 0.4
 
     async def validate(self, entities: List[DataEntity]) -> List[ValidationResult]:
         """
@@ -141,9 +199,15 @@ class RedditJsonScraper(Scraper):
             normalize_label(scrape_config.labels[0]) if scrape_config.labels else "all"
         )
 
-        bt.logging.trace(
-            f"Running Reddit JSON scraper with subreddit: {subreddit_name}."
-        )
+        # Get community tier for credibility weighting (Phase 3)
+        if subreddit_name != "all":
+            tier_name, tier_weight = self._get_community_tier(subreddit_name)
+            bt.logging.trace(
+                f"Running Reddit JSON scraper for {subreddit_name} "
+                f"({tier_name}, credibility_weight={tier_weight})"
+            )
+        else:
+            bt.logging.trace(f"Running Reddit JSON scraper with subreddit: {subreddit_name}.")
 
         # Get the search parameters
         limit = min(scrape_config.entity_limit, 100)  # Reddit API max is 100

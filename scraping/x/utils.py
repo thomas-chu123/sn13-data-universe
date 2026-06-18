@@ -416,7 +416,13 @@ def validate_data_entity_fields(
 
 
 def is_spam_account(author_data: dict) -> bool:
-    """Check if an account exhibits spam characteristics.
+    """Enhanced spam detection for Twitter accounts.
+    
+    Multi-layer spam detection checks:
+    1. Follower threshold (minimum 50)
+    2. Account age (minimum 30 days)
+    3. Follower-Following ratio anomaly (potential bot)
+    4. Profile completeness (bio, location, profile image)
 
     Args:
         author_data: Author data from actor response
@@ -428,31 +434,55 @@ def is_spam_account(author_data: dict) -> bool:
     if not isinstance(author_data, dict):
         return True
 
-    # Check minimum followers (50+)
+    # Layer 1: Check minimum followers (50+)
     followers = author_data.get("followers", 0)
     if followers < 50:
+        bt.logging.trace(f"Filtered spam account: followers={followers} (< 50)")
         return True
 
-    # Check account age (30+ days)
+    # Layer 2: Check account age (30+ days)
     created_at_str = author_data.get("createdAt")
     if created_at_str:
         try:
             created_at = dt.datetime.strptime(created_at_str, "%a %b %d %H:%M:%S %z %Y")
             account_age = dt.datetime.now(dt.timezone.utc) - created_at
             if account_age.days < 30:
+                bt.logging.trace(f"Filtered spam account: account_age={account_age.days}d (< 30d)")
                 return True
         except (ValueError, TypeError):
-            # If we can't parse the date, be conservative and reject
             return True
     else:
-        # No creation date = suspicious
+        return True
+
+    # Layer 3: Check follower-following ratio (detect bot-like behavior)
+    # Bots typically follow way more than who follow them
+    following = author_data.get("following", followers)
+    if following > 0 and followers > 0:
+        ratio = following / followers
+        if ratio > 10:  # Following 10x more than followers = suspicious
+            bt.logging.trace(f"Filtered suspicious ratio account: following/followers={ratio:.1f}")
+            return True
+
+    # Layer 4: Check profile completeness (bots often have incomplete profiles)
+    # If no bio and no profile picture URL = likely bot
+    has_bio = bool(author_data.get("description", "").strip())
+    has_profile_pic = bool(author_data.get("profilePicture"))
+    
+    if not has_bio and not has_profile_pic:
+        bt.logging.trace("Filtered incomplete profile account: no bio and no profile picture")
         return True
 
     return False
 
 
 def is_low_engagement_tweet(tweet_data: dict) -> bool:
-    """Check if a tweet has suspiciously low engagement.
+    """Enhanced low engagement detection for tweets.
+    
+    Multi-layer engagement checks:
+    1. Minimum view count (500 views)
+    2. Engagement ratio (minimum 0.5% of views = engagement)
+    3. Penalize retweets over original tweets
+    4. Penalize reply tweets vs original tweets
 
     Args:
         tweet_data: Tweet data from actor response
@@ -464,10 +494,44 @@ def is_low_engagement_tweet(tweet_data: dict) -> bool:
     if not isinstance(tweet_data, dict):
         return True
 
-    # Check minimum views (50+)
+    # Layer 1: Check minimum views (500+ for higher quality)
+    # Reduced from validator's 50+ to prefer higher quality tweets
     view_count = tweet_data.get("viewCount", 0)
-    if view_count < 50:
+    if view_count < 500:
+        bt.logging.trace(f"Filtered low engagement tweet: views={view_count} (< 500)")
         return True
+
+    # Layer 2: Check engagement ratio (views → interactions)
+    # Calculate total engagement
+    like_count = tweet_data.get("likeCount", 0)
+    retweet_count = tweet_data.get("retweetCount", 0)
+    reply_count = tweet_data.get("replyCount", 0)
+    quote_count = tweet_data.get("quoteCount", 0)
+    
+    total_engagement = like_count + retweet_count + reply_count + quote_count
+    
+    # Minimum 0.5% engagement ratio (5 interactions per 1000 views)
+    if view_count > 0:
+        engagement_ratio = total_engagement / view_count
+        if engagement_ratio < 0.005:  # 0.5%
+            bt.logging.trace(
+                f"Filtered low engagement ratio: {engagement_ratio*100:.2f}% "
+                f"({total_engagement}/{view_count} interactions)"
+            )
+            return True
+
+    # Layer 3: Penalize retweets (but don't hard-filter)
+    # Retweets are less valuable than original content
+    if tweet_data.get("isRetweet", False):
+        bt.logging.trace("Detected retweet (lower priority than original)")
+        # Don't return True here, just logged for prioritization
+
+    # Layer 4: Penalize replies (original tweets are more valuable)
+    if tweet_data.get("isReply", False):
+        # Still accept but these are lower quality
+        if view_count < 1000:  # Stricter threshold for replies
+            bt.logging.trace(f"Filtered low engagement reply: views={view_count} (< 1000 for replies)")
+            return True
 
     return False
 
