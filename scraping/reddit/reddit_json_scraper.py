@@ -24,13 +24,37 @@ class RedditJsonScraper(Scraper):
     This scraper accesses publicly available data through Reddit's .json endpoints.
     """
 
-    USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)"
+    # Rotate User-Agents to avoid 403 blocking
+    USER_AGENTS = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15",
+    ]
+    
+    # Default user agent (will rotate in _get_headers)
+    USER_AGENT = USER_AGENTS[0]
     BASE_URL = "https://www.reddit.com"
 
     # Rate limiting settings
     REQUEST_TIMEOUT = 10  # seconds
     MAX_RETRIES = 3
     RETRY_DELAY = 2  # seconds
+    
+    # Request counter for User-Agent rotation
+    _request_count = 0
+
+    def _get_headers(self):
+        """Get headers with rotating User-Agent to avoid 403 blocking"""
+        user_agent = self.USER_AGENTS[self._request_count % len(self.USER_AGENTS)]
+        self._request_count += 1
+        return {
+            "User-Agent": user_agent,
+            "Accept": "application/json",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "no-cache",
+        }
 
     async def validate(self, entities: List[DataEntity]) -> List[ValidationResult]:
         """
@@ -41,7 +65,7 @@ class RedditJsonScraper(Scraper):
 
         results: List[ValidationResult] = []
 
-        async with aiohttp.ClientSession(headers={"User-Agent": self.USER_AGENT}) as session:
+        async with aiohttp.ClientSession(headers=self._get_headers()) as session:
             for entity in entities:
                 # 1) Basic URI sanity check
                 if not is_valid_reddit_url(entity.uri):
@@ -127,7 +151,7 @@ class RedditJsonScraper(Scraper):
 
         contents = []
         try:
-            async with aiohttp.ClientSession(headers={"User-Agent": self.USER_AGENT}) as session:
+            async with aiohttp.ClientSession(headers=self._get_headers()) as session:
                 # Fetch posts from the subreddit
                 # IMPORTANT: raw_json=1 returns unescaped text (e.g., ">" instead of "&gt;")
                 # This matches PRAW output format for consistent validation with miners
@@ -205,7 +229,7 @@ class RedditJsonScraper(Scraper):
         limit = min(limit, 100)  # Reddit API max is 100
 
         try:
-            async with aiohttp.ClientSession(headers={"User-Agent": self.USER_AGENT}) as session:
+            async with aiohttp.ClientSession(headers=self._get_headers()) as session:
 
                 # Case 1: Search by usernames
                 if usernames:
@@ -307,6 +331,21 @@ class RedditJsonScraper(Scraper):
                         await asyncio.sleep(retry_after)
                         continue
 
+                    if response.status == 403:
+                        # 403 Forbidden - subreddit is quarantined, private, or banned
+                        # Extract subreddit name from URL for better logging
+                        try:
+                            subreddit = url.split('/r/')[1].split('/')[0]
+                            bt.logging.warning(
+                                f"403 Forbidden for r/{subreddit} - likely rate limited or quarantined. "
+                                f"Increasing delay between requests."
+                            )
+                        except:
+                            bt.logging.warning(f"403 Forbidden from {url} - likely rate limited")
+                        # Add extra delay to avoid further 403s
+                        await asyncio.sleep(5)
+                        return []  # Don't retry 403s, they won't succeed
+
                     if response.status != 200:
                         bt.logging.warning(f"Got status {response.status} from {url}")
                         if attempt < self.MAX_RETRIES - 1:
@@ -315,6 +354,9 @@ class RedditJsonScraper(Scraper):
                         return []
 
                     data = await response.json()
+
+                    # Add small delay after successful request to respect Reddit's rate limits
+                    await asyncio.sleep(1)
 
                     # Reddit JSON API returns data in "data" -> "children" structure
                     if isinstance(data, dict) and "data" in data:
