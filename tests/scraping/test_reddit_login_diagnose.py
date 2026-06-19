@@ -39,7 +39,7 @@ async def diagnose_reddit_login():
         try:
             # 建立瀏覽器
             logger.info("📱 啟動瀏覽器...")
-            browser = await p.chromium.launch(
+            browser = await p.firefox.launch(
                 headless=False,  # 不使用無頭模式，這樣可以看到登入過程
                 args=["--no-sandbox", "--disable-dev-shm-usage"]
             )

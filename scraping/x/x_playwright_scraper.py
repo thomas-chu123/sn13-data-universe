@@ -42,8 +42,8 @@ class XPlaywrightScraper(Scraper):
             logger.debug("🚀 [X] 初始化瀏覽器...")
             self.playwright = await async_playwright().start()
             logger.debug("🚀 [X] Playwright 已啟動")
-            # 使用 chromium，設置 headless 模式
-            self.browser = await self.playwright.chromium.launch(
+            # 使用 Firefox，設置 headless 模式
+            self.browser = await self.playwright.firefox.launch(
                 headless=True,
                 args=[
                     '--no-sandbox',

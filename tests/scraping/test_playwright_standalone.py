@@ -33,7 +33,7 @@ async def test_x_playwright_basic():
         logger.info("📱 啟動瀏覽器...")
         
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            browser = await p.firefox.launch(headless=True)
             logger.info("✅ 瀏覽器已啟動")
             
             context = await browser.new_context()
@@ -76,7 +76,7 @@ async def test_reddit_playwright_basic():
         logger.info("📱 啟動瀏覽器...")
         
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            browser = await p.firefox.launch(headless=True)
             logger.info("✅ 瀏覽器已啟動")
             
             context = await browser.new_context()

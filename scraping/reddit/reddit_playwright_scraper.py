@@ -40,7 +40,7 @@ class RedditPlaywrightScraper(Scraper):
         """初始化 Playwright 瀏覽器"""
         if self.browser is None:
             self.playwright = await async_playwright().start()
-            self.browser = await self.playwright.chromium.launch(
+            self.browser = await self.playwright.firefox.launch(
                 headless=True,
                 args=[
                     '--no-sandbox',

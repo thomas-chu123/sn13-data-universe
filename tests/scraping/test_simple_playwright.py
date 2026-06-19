@@ -22,9 +22,9 @@ async def main():
         pw = await async_playwright().start()
         logger.info("✅ async_playwright 已啟動")
         
-        logger.info("\n2️⃣ 啟動 Chromium 瀏覽器...")
-        browser = await pw.chromium.launch()
-        logger.info("✅ Chromium 已啟動")
+        logger.info("\n2️⃣ 啟動 Firefox 瀏覽器...")
+        browser = await pw.firefox.launch()
+        logger.info("✅ Firefox 已啟動")
         
         logger.info("\n3️⃣ 創建新標籤頁...")
         page = await browser.new_page()
