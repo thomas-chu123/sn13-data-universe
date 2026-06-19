@@ -5,6 +5,7 @@ X/Twitter Scraper using Playwright (Browser Automation)
 """
 
 import asyncio
+import datetime as dt
 import logging
 import os
 from datetime import datetime, timedelta
@@ -15,6 +16,7 @@ from playwright.async_api import async_playwright, Page
 from bittensor.core.metagraph import Metagraph
 
 from common.data import DataEntity, DataSource, DataEntityBucket
+from common.protocol import KeywordMode
 from scraping.scraper import Scraper, ScraperId, ValidationResult
 from scraping.playwright_auth_helper import PlaywrightAuthHelper
 
@@ -363,41 +365,77 @@ class XPlaywrightScraper(Scraper):
         self,
         usernames: Optional[List[str]] = None,
         keywords: Optional[List[str]] = None,
-        urls: Optional[List[str]] = None,
-        max_results: int = 100,
+        url: Optional[str] = None,
+        keyword_mode: KeywordMode = "all",
+        start_datetime: dt.datetime = None,
+        end_datetime: dt.datetime = None,
+        limit: int = 100,
     ) -> List[XContent]:
-        """按需爬取"""
+        """按需爬取
+        
+        Args:
+            usernames: List of target usernames
+            keywords: List of keywords to search for
+            url: Single tweet URL for direct tweet lookup
+            keyword_mode: "any" (OR logic) or "all" (AND logic) for keyword matching
+            start_datetime: Earliest datetime for content (UTC)
+            end_datetime: Latest datetime for content (UTC)
+            limit: Maximum number of items to return
+        """
         try:
             all_tweets = []
             
             # 爬取指定用戶的推文
             if usernames:
+                batch_size = limit // len(usernames) if usernames else limit
                 for username in usernames:
                     tweets = await self._search_tweets(
                         query=f"from:{username}",
-                        max_results=max_results // len(usernames),
+                        max_results=batch_size,
                     )
                     all_tweets.extend(tweets)
+            
+            # 爬取單個 URL 的推文
+            if url:
+                tweets = await self._search_tweets(
+                    query=f"url:{url}",
+                    max_results=limit // 2 if keywords else limit,
+                )
+                all_tweets.extend(tweets)
             
             # 爬取包含關鍵字的推文
             if keywords:
-                for keyword in keywords:
+                batch_size = limit // len(keywords) if keywords else limit
+                if keyword_mode == "all":
+                    # AND logic - search for all keywords together
+                    query = " ".join(keywords)
                     tweets = await self._search_tweets(
-                        query=keyword,
-                        max_results=max_results // len(keywords),
+                        query=query,
+                        max_results=batch_size,
                     )
                     all_tweets.extend(tweets)
+                else:
+                    # OR logic - search for each keyword separately
+                    for keyword in keywords:
+                        tweets = await self._search_tweets(
+                            query=keyword,
+                            max_results=batch_size,
+                        )
+                        all_tweets.extend(tweets)
             
-            # 爬取包含 URL 的推文
-            if urls:
-                for url in urls:
-                    tweets = await self._search_tweets(
-                        query=f"url:{url}",
-                        max_results=max_results // len(urls),
-                    )
-                    all_tweets.extend(tweets)
+            # Filter by date range if provided
+            if start_datetime or end_datetime:
+                filtered_tweets = []
+                for tweet in all_tweets:
+                    tweet_time = dt.datetime.fromisoformat(tweet.created_at.replace('Z', '+00:00'))
+                    if start_datetime and tweet_time < start_datetime:
+                        continue
+                    if end_datetime and tweet_time > end_datetime:
+                        continue
+                    filtered_tweets.append(tweet)
+                all_tweets = filtered_tweets
             
-            return all_tweets[:max_results]
+            return all_tweets[:limit]
             
         except Exception as e:
             logger.error(f"按需爬取失敗: {e}")

@@ -5,6 +5,7 @@ Reddit Scraper using Playwright (Browser Automation)
 """
 
 import asyncio
+import datetime as dt
 import logging
 import os
 from datetime import datetime, timedelta
@@ -14,6 +15,7 @@ from urllib.parse import quote
 from playwright.async_api import async_playwright, Page
 
 from common.data import DataEntity, DataSource, DataEntityBucket
+from common.protocol import KeywordMode
 from scraping.scraper import Scraper, ScraperId, ValidationResult
 from scraping.playwright_auth_helper import PlaywrightAuthHelper
 
@@ -346,24 +348,72 @@ class RedditPlaywrightScraper(Scraper):
     
     async def on_demand_scrape(
         self,
-        subreddits: Optional[List[str]] = None,
+        usernames: Optional[List[str]] = None,
+        subreddit: Optional[str] = "all",
         keywords: Optional[List[str]] = None,
-        max_results: int = 100,
+        keyword_mode: KeywordMode = "all",
+        start_datetime: dt.datetime = None,
+        end_datetime: dt.datetime = None,
+        limit: int = 100,
     ) -> List[RedditContent]:
-        """按需爬取"""
+        """按需爬取
+        
+        Args:
+            usernames: List of target usernames - content from any of these users will be included (OR logic)
+            subreddit: Target specific subreddit (without r/ prefix)
+            keywords: List of keywords to search for
+            keyword_mode: "any" (OR logic) or "all" (AND logic) for keyword matching
+            start_datetime: Earliest datetime for content (UTC)
+            end_datetime: Latest datetime for content (UTC)
+            limit: Maximum number of items to return
+        """
         try:
             all_posts = []
             
             # 爬取指定 subreddit
-            if subreddits:
-                for subreddit in subreddits:
-                    posts = await self._search_subreddit_posts(
-                        subreddit=subreddit.replace('r/', ''),
-                        max_results=max_results // len(subreddits),
-                    )
-                    all_posts.extend(posts)
+            if subreddit and subreddit != "all":
+                posts = await self._search_subreddit_posts(
+                    subreddit=subreddit.replace('r/', ''),
+                    max_results=limit,
+                )
+                all_posts.extend(posts)
             
-            return all_posts[:max_results]
+            # Filter by date range if provided
+            if start_datetime or end_datetime:
+                filtered_posts = []
+                for post in all_posts:
+                    post_time = dt.datetime.fromisoformat(post.created_at.replace('Z', '+00:00'))
+                    if start_datetime and post_time < start_datetime:
+                        continue
+                    if end_datetime and post_time > end_datetime:
+                        continue
+                    filtered_posts.append(post)
+                all_posts = filtered_posts
+            
+            # Filter by username if provided
+            if usernames:
+                filtered_posts = [
+                    post for post in all_posts
+                    if post.username in usernames
+                ]
+                all_posts = filtered_posts
+            
+            # Filter by keywords if provided
+            if keywords:
+                filtered_posts = []
+                for post in all_posts:
+                    post_text = (post.title + " " + (post.text or "")).lower()
+                    if keyword_mode == "all":
+                        # AND logic - all keywords must be present
+                        if all(kw.lower() in post_text for kw in keywords):
+                            filtered_posts.append(post)
+                    else:
+                        # OR logic - at least one keyword must be present
+                        if any(kw.lower() in post_text for kw in keywords):
+                            filtered_posts.append(post)
+                all_posts = filtered_posts
+            
+            return all_posts[:limit]
             
         except Exception as e:
             logger.error(f"按需爬取失敗: {e}")
