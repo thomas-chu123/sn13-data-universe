@@ -2,61 +2,65 @@
 
 ## Git Workflow Rules
 
-### ⛔ DO NOT automatically push to Git
+### ⛔ DO NOT commit or push changes automatically
 
-**IMPORTANT**: After completing work, do NOT automatically execute `git push` commands.
+**IMPORTANT**: After completing work, do NOT automatically execute `git commit` or `git push` commands.
 
 **Expected workflow**:
-1. ✅ Make code changes
-2. ✅ Run `git add` and `git commit` with descriptive messages
-3. ✅ Show commit details in the chat
-4. ⛔ **STOP** - Do not push to remote repository
-5. ✅ Wait for user confirmation before pushing
+1. ✅ Make code changes only
+2. ⛔ **STOP** - Do not commit
+3. ⛔ **STOP** - Do not push
+4. ✅ Wait for user confirmation before any git operations
 
 **Why**: 
-- Users need to review commits locally
-- Some work may be in progress and shouldn't be pushed yet
-- Users may want to squash, rebase, or amend commits
+- Users need to review changes first
+- Users decide when and what to commit
+- Users control the commit process and messages
 - CI/CD pipeline should be under user control
 
-### When to Commit
+### When to Make Changes
 
-- ✅ After implementing a feature or fix
-- ✅ After all tests pass locally
-- ✅ After resolving an issue
-- ✅ Include detailed commit messages explaining the changes
+- ✅ Implement features or fixes
+- ✅ Update documentation
+- ✅ Modify configuration
+- ✅ Show changes in the chat
 
-### When NOT to Push
+### When NOT to Use Git
 
-- ⛔ Do not push without explicit user request
-- ⛔ Do not push after every commit
-- ⛔ Do not push if user asks to "save" or "commit" work
-- ⛔ Only push if user explicitly says "push to git/GitHub/origin"
+- ⛔ Do not run `git add`
+- ⛔ Do not run `git commit`
+- ⛔ Do not run `git push`
+- ⛔ Do not automatically perform any git operations
 
 ### Example Correct Workflow
 
 **Instead of**:
 ```bash
+# Make changes
+# Then automatically:
 git add -A
 git commit -m "..."
-git push origin main  # ❌ WRONG - Do this automatically
+git push origin main  # ❌ WRONG
 ```
 
 **Do this**:
 ```bash
-git add -A
-git commit -m "..."
-# ✅ STOP HERE - Wait for user to request push
+# Make changes only
+# ✅ STOP HERE
+# User decides what to do with git
 ```
 
 Then inform the user:
 ```
-✅ Changes committed successfully:
-- Commit: abc1234
-- Message: "feat: Add new feature..."
-- Files changed: 3
+✅ Changes made successfully:
+- Modified: src/file.ts
+- Created: src/new-file.ts
+- Updated: config.json
 
-Ready to push when you are. Run: git push origin main
+When ready, you can:
+  git add -A
+  git commit -m "description"
+  git push origin main
 ```
 
 ---
