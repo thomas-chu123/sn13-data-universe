@@ -6,7 +6,7 @@ import os
 import asyncio
 import logging
 from typing import Optional, Tuple
-from playwright.async_api import async_playwright, Page, Browser
+from playwright.async_api import Page
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +16,63 @@ class PlaywrightAuthHelper:
     
     TWITTER_LOGIN_URL = "https://x.com/i/flow/login"
     REDDIT_LOGIN_URL = "https://www.reddit.com/login"
+
+    @staticmethod
+    async def _first_visible_element(page: Page, selector: str, timeout: int = 10000):
+        """
+        Return the first visible element matching selector.
+        X often keeps duplicate hidden inputs in the DOM; query_selector can pick
+        one that exists but can never receive pointer events.
+        """
+        await page.wait_for_selector(selector, state="visible", timeout=timeout)
+        elements = await page.query_selector_all(selector)
+        first_visible = None
+        for element in elements:
+            try:
+                if not await element.is_visible():
+                    continue
+                if first_visible is None:
+                    first_visible = element
+                receives_pointer = await element.evaluate("""(el) => {
+                    const rect = el.getBoundingClientRect();
+                    const x = rect.left + rect.width / 2;
+                    const y = rect.top + rect.height / 2;
+                    const hit = document.elementFromPoint(x, y);
+                    return hit === el || el.contains(hit) || (hit && hit.contains(el));
+                }""")
+                if receives_pointer:
+                    return element
+            except Exception:
+                continue
+        return first_visible
+
+    @staticmethod
+    async def _fill_input(element, value: str, timeout: int = 5000):
+        try:
+            await element.fill(value, timeout=timeout)
+            return
+        except Exception as e:
+            logger.debug(f"ℹ️ Playwright fill failed, using DOM fallback: {e}")
+
+        await element.evaluate("""(el, value) => {
+            const proto = el instanceof HTMLTextAreaElement
+                ? HTMLTextAreaElement.prototype
+                : HTMLInputElement.prototype;
+            const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
+            el.focus();
+            setter.call(el, value);
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+        }""", value)
+
+    @staticmethod
+    async def _click_element(element, timeout: int = 5000):
+        try:
+            await element.click(timeout=timeout)
+            return
+        except Exception as e:
+            logger.debug(f"ℹ️ Playwright click failed, using DOM fallback: {e}")
+        await element.evaluate("""(el) => el.click()""")
     
     @staticmethod
     async def _click_exact_button(page: Page, target_texts: list) -> bool:
@@ -33,10 +90,12 @@ class PlaywrightAuthHelper:
             buttons = await page.query_selector_all("button")
             for btn in buttons:
                 try:
+                    if not await btn.is_visible():
+                        continue
                     text = (await btn.inner_text()).strip()
                     if text in target_texts:
                         logger.debug(f"✅ 找到按鈕: '{text}'，點擊...")
-                        await btn.click()
+                        await PlaywrightAuthHelper._click_element(btn)
                         return True
                 except Exception:
                     continue
@@ -111,8 +170,9 @@ class PlaywrightAuthHelper:
                 'input[name="text"]',
             ]:
                 try:
-                    await page.wait_for_selector(selector, timeout=10000)
-                    username_input = await page.query_selector(selector)
+                    username_input = await PlaywrightAuthHelper._first_visible_element(
+                        page, selector, timeout=10000
+                    )
                     if username_input:
                         logger.debug(f"✅ [Twitter] 找到用戶名輸入框: {selector}")
                         break
@@ -125,8 +185,7 @@ class PlaywrightAuthHelper:
             
             # 輸入用戶名
             logger.debug("📝 [Twitter] 輸入用戶名...")
-            await username_input.click()
-            await username_input.fill(username)
+            await PlaywrightAuthHelper._fill_input(username_input, username)
             await asyncio.sleep(1)
             logger.debug("✅ [Twitter] 用戶名已輸入")
             
@@ -138,12 +197,19 @@ class PlaywrightAuthHelper:
             
             if not clicked:
                 # 備用：嘗試 data-testid
-                btn = await page.query_selector('[data-testid="LoginForm_Login_Button"]')
-                if not btn:
-                    btn = await page.query_selector('button[type="submit"]')
+                btn = None
+                for selector in ['[data-testid="LoginForm_Login_Button"]', 'button[type="submit"]']:
+                    try:
+                        btn = await PlaywrightAuthHelper._first_visible_element(
+                            page, selector, timeout=2000
+                        )
+                        if btn:
+                            break
+                    except Exception:
+                        continue
                 if btn:
                     logger.debug("✅ [Twitter] 備用方式找到 Continue 按鈕，點擊...")
-                    await btn.click()
+                    await PlaywrightAuthHelper._click_element(btn)
                     clicked = True
                     
             if not clicked:
@@ -158,8 +224,9 @@ class PlaywrightAuthHelper:
             password_input = None
             for selector in ['input[name="password"]', 'input[type="password"]']:
                 try:
-                    await page.wait_for_selector(selector, timeout=15000)
-                    password_input = await page.query_selector(selector)
+                    password_input = await PlaywrightAuthHelper._first_visible_element(
+                        page, selector, timeout=15000
+                    )
                     if password_input:
                         logger.debug(f"✅ [Twitter] 找到密碼輸入框: {selector}")
                         break
@@ -173,13 +240,13 @@ class PlaywrightAuthHelper:
                 for i, inp in enumerate(inputs):
                     name = await inp.get_attribute("name")
                     ph = await inp.get_attribute("placeholder")
-                    logger.debug(f"   Input {i}: name={name}, placeholder={ph}")
+                    visible = await inp.is_visible()
+                    logger.debug(f"   Input {i}: name={name}, placeholder={ph}, visible={visible}")
                 return False
             
             # 輸入密碼
             logger.debug("📝 [Twitter] 輸入密碼...")
-            await password_input.click()
-            await password_input.fill(password)
+            await PlaywrightAuthHelper._fill_input(password_input, password)
             await asyncio.sleep(1)
             logger.debug("✅ [Twitter] 密碼已輸入")
             
@@ -196,10 +263,16 @@ class PlaywrightAuthHelper:
                     '[data-testid="LoginForm_Login_Button"]',
                     'button[type="submit"]',
                 ]:
-                    btn = await page.query_selector(selector)
+                    btn = None
+                    try:
+                        btn = await PlaywrightAuthHelper._first_visible_element(
+                            page, selector, timeout=2000
+                        )
+                    except Exception:
+                        continue
                     if btn:
                         logger.debug(f"✅ [Twitter] 備用方式找到登入按鈕 ({selector})，點擊...")
-                        await btn.click()
+                        await PlaywrightAuthHelper._click_element(btn)
                         login_clicked = True
                         break
             
@@ -298,7 +371,7 @@ class PlaywrightAuthHelper:
                 login_btn = await page.query_selector('button[type="submit"]')
                 if login_btn:
                     logger.debug("✅ [Reddit] 備用方式找到登入按鈕，點擊...")
-                    await login_btn.click()
+                    await PlaywrightAuthHelper._click_element(login_btn)
                     login_clicked = True
             
             if not login_clicked:

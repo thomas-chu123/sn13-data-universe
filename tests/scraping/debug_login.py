@@ -10,6 +10,61 @@ logging.basicConfig(
 )
 logger = logging.getLogger("debug_login")
 
+
+async def first_visible_element(page, selector: str, timeout: int = 10000):
+    """Find the first visible match; X keeps hidden duplicate login inputs."""
+    await page.wait_for_selector(selector, state="visible", timeout=timeout)
+    elements = await page.query_selector_all(selector)
+    first_visible = None
+    for element in elements:
+        try:
+            if not await element.is_visible():
+                continue
+            if first_visible is None:
+                first_visible = element
+            receives_pointer = await element.evaluate("""(el) => {
+                const rect = el.getBoundingClientRect();
+                const x = rect.left + rect.width / 2;
+                const y = rect.top + rect.height / 2;
+                const hit = document.elementFromPoint(x, y);
+                return hit === el || el.contains(hit) || (hit && hit.contains(el));
+            }""")
+            if receives_pointer:
+                return element
+        except Exception:
+            continue
+    return first_visible
+
+
+async def fill_input(element, value: str, timeout: int = 5000):
+    """Fill normally, then fall back to React-compatible DOM events."""
+    try:
+        await element.fill(value, timeout=timeout)
+        return
+    except Exception as err:
+        logger.info("Playwright fill 超时/失败，使用 DOM fallback: %s", err)
+
+    await element.evaluate("""(el, value) => {
+        const proto = el instanceof HTMLTextAreaElement
+            ? HTMLTextAreaElement.prototype
+            : HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
+        el.focus();
+        setter.call(el, value);
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+    }""", value)
+
+
+async def click_element(element, timeout: int = 5000):
+    """Click normally, then fall back to DOM click if an overlay blocks actionability."""
+    try:
+        await element.click(timeout=timeout)
+        return
+    except Exception as err:
+        logger.info("Playwright click 超时/失败，使用 DOM fallback: %s", err)
+    await element.evaluate("""(el) => el.click()""")
+
 async def debug_x():
     logger.info("=" * 60)
     logger.info("调试 X / Twitter 登入")
@@ -48,25 +103,41 @@ async def debug_x():
                 placeholder = await inp.get_attribute("placeholder")
                 autocomplete = await inp.get_attribute("autocomplete")
                 type_attr = await inp.get_attribute("type")
-                logger.info("  Input %d: name=%s, placeholder=%s, autocomplete=%s, type=%s", i, name, placeholder, autocomplete, type_attr)
+                visible = await inp.is_visible()
+                box = await inp.bounding_box()
+                logger.info(
+                    "  Input %d: name=%s, placeholder=%s, autocomplete=%s, type=%s, visible=%s, box=%s",
+                    i, name, placeholder, autocomplete, type_attr, visible, box,
+                )
                 
             # 寻找用户名输入框
             # 常见选择器: input[autocomplete="username"], input[name="text"]
-            username_input = await page.query_selector('input[autocomplete="username"]')
-            if not username_input:
-                username_input = await page.query_selector('input[name="text"]')
-            if not username_input:
-                username_input = await page.query_selector('input[type="text"]')
+            username_input = None
+            for selector in [
+                'input[autocomplete="username"]',
+                'input[name="username_or_email"]',
+                'input[name="text"]',
+                'input[type="text"]',
+            ]:
+                try:
+                    username_input = await first_visible_element(page, selector, timeout=10000)
+                    if username_input:
+                        logger.info("使用用户名输入框 selector: %s", selector)
+                        break
+                except Exception:
+                    continue
                 
             if username_input:
                 logger.info("输入用户名...")
-                await username_input.fill(username)
+                await fill_input(username_input, username)
                 await page.screenshot(path="x_step2_username_filled.png")
                 
                 next_btn = None
                 buttons = await page.query_selector_all("button")
                 logger.info("找到 %d 个 button:", len(buttons))
                 for btn in buttons:
+                    if not await btn.is_visible():
+                        continue
                     text = await btn.inner_text()
                     text_strip = text.strip()
                     logger.info("  Button text: %s", text_strip)
@@ -76,7 +147,7 @@ async def debug_x():
                         
                 if next_btn:
                     logger.info("点击 Next/Continue 按钮...")
-                    await next_btn.click()
+                    await click_element(next_btn)
                     await page.wait_for_timeout(5000)
                     await page.screenshot(path="x_step3_after_next.png")
                     logger.info("点击 Next 后的 URL: %s", page.url)
@@ -87,13 +158,18 @@ async def debug_x():
                         await page.wait_for_selector('input[name="password"]', timeout=10000)
                     except Exception:
                         pass
-                    password_input = await page.query_selector('input[name="password"]')
-                    if not password_input:
-                        password_input = await page.query_selector('input[type="password"]')
+                    password_input = None
+                    for selector in ['input[name="password"]', 'input[type="password"]']:
+                        try:
+                            password_input = await first_visible_element(page, selector, timeout=10000)
+                            if password_input:
+                                logger.info("使用密码输入框 selector: %s", selector)
+                                break
+                        except Exception:
+                            continue
                     if password_input:
                         logger.info("找到密码输入框，输入密码...")
-                        await password_input.click()
-                        await password_input.fill(password)
+                        await fill_input(password_input, password)
                         await page.wait_for_timeout(500)
                         await page.screenshot(path="x_step4_password_filled.png")
                         
@@ -102,6 +178,8 @@ async def debug_x():
                         buttons = await page.query_selector_all("button")
                         logger.info("密码填写后找到 %d 个 button:", len(buttons))
                         for btn in buttons:
+                            if not await btn.is_visible():
+                                continue
                             raw_text = await btn.inner_text()
                             text = raw_text.strip()
                             data_testid = await btn.get_attribute("data-testid")
@@ -113,23 +191,38 @@ async def debug_x():
                         
                         if not login_btn:
                             # 备用1: data-testid
-                            login_btn = await page.query_selector('[data-testid="LoginForm_Login_Button"]')
-                            if login_btn:
-                                logger.info("备用1: 通过 data-testid 找到登录按钮")
+                            try:
+                                login_btn = await first_visible_element(
+                                    page, '[data-testid="LoginForm_Login_Button"]', timeout=2000
+                                )
+                                if login_btn:
+                                    logger.info("备用1: 通过 data-testid 找到登录按钮")
+                            except Exception:
+                                pass
                         if not login_btn:
                             # 备用2: type=submit
-                            login_btn = await page.query_selector('button[type="submit"]')
-                            if login_btn:
-                                logger.info("备用2: 通过 type=submit 找到登录按钮")
+                            try:
+                                login_btn = await first_visible_element(
+                                    page, 'button[type="submit"]', timeout=2000
+                                )
+                                if login_btn:
+                                    logger.info("备用2: 通过 type=submit 找到登录按钮")
+                            except Exception:
+                                pass
                         if not login_btn:
                             # 备用3: aria-label
-                            login_btn = await page.query_selector('button[aria-label*="Log"]')
-                            if login_btn:
-                                logger.info("备用3: 通过 aria-label 找到登录按钮")
+                            try:
+                                login_btn = await first_visible_element(
+                                    page, 'button[aria-label*="Log"]', timeout=2000
+                                )
+                                if login_btn:
+                                    logger.info("备用3: 通过 aria-label 找到登录按钮")
+                            except Exception:
+                                pass
                             
                         if login_btn:
                             logger.info("点击登录按钮...")
-                            await login_btn.click()
+                            await click_element(login_btn)
                             await page.wait_for_timeout(10000)
                             await page.screenshot(path="x_step5_after_login.png")
                             logger.info("登录后的 URL: %s", page.url)
