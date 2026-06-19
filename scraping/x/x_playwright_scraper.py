@@ -13,7 +13,6 @@ from typing import List, Optional
 from urllib.parse import quote
 
 from playwright.async_api import async_playwright, Page
-from bittensor.core.metagraph import Metagraph
 
 from common.data import DataEntity, DataSource, DataEntityBucket
 from common.protocol import KeywordMode
