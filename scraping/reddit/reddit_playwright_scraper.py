@@ -275,8 +275,9 @@ class RedditPlaywrightScraper(Scraper):
         try:
             page = await self._get_page()
             
-            # 訪問帖子
-            post_url = f"{self.REDDIT_URL}/r/{entity.subreddit}/comments/{entity.post_id}"
+            # 訪問帖子 - 從 entity.community 移除 r/ 前綴
+            community = entity.community.replace('r/', '')
+            post_url = f"{self.REDDIT_URL}/r/{community}/comments/{entity.id}"
             await page.goto(post_url, wait_until='networkidle', timeout=self.TIMEOUT)
             
             # 檢查帖子標題是否存在
