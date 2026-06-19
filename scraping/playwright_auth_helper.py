@@ -219,17 +219,29 @@ class PlaywrightAuthHelper:
                 # 等待登入完成
                 logger.debug(f"⏳ [Reddit] 等待登入完成...")
                 try:
-                    # 等待導航離開登入頁面（URL 應該改變）
-                    # Reddit 登入後可能導航到首頁或直接返回前一頁
-                    await page.wait_for_load_state('networkidle', timeout=60000)
-                    logger.debug("✅ [Reddit] 網路已穩定")
+                    # 先等待一下，讓 JavaScript 挑戰（js_challenge）可以執行
+                    await asyncio.sleep(3)
+                    logger.debug("✅ [Reddit] 已等待 JavaScript 挑戰時間")
+                    
+                    # 等待導航或頁面穩定（嘗試多個條件）
+                    # Reddit 可能會在 js_challenge 之後導航，或者頁面會更新
+                    try:
+                        await page.wait_for_load_state('networkidle', timeout=60000)
+                        logger.debug("✅ [Reddit] 網路已穩定")
+                    except:
+                        logger.warning("⚠️ [Reddit] 網路穩定超時，繼續檢查...")
+                        await asyncio.sleep(5)
                     
                     current_url = page.url
                     logger.debug(f"📍 [Reddit] 當前 URL: {current_url}")
                     
                     # 檢查是否已登出登入頁面
-                    if "login" not in current_url and "password" not in current_url:
-                        logger.info(f"✅ [Reddit] 登入成功 - 已離開登入頁面 (URL: {current_url})")
+                    # 排除 js_challenge 和 solution 參數
+                    is_login_page = ("login" in current_url or "password" in current_url) and \
+                                   ("js_challenge" in current_url or not any(x in current_url for x in ["/?", "reddit.com/r/"]))
+                    
+                    if not is_login_page or "reddit.com/r/" in current_url or "/user/" in current_url:
+                        logger.info(f"✅ [Reddit] 登入成功 - 已離開登入流程 (URL: {current_url})")
                         
                         # 等待一下，讓頁面完全加載
                         await asyncio.sleep(2)
@@ -237,6 +249,15 @@ class PlaywrightAuthHelper:
                         return True
                     else:
                         logger.warning(f"❌ [Reddit] 仍在登入頁面: {current_url}")
+                        # 嘗試檢查是否有其他元素表明登入成功
+                        try:
+                            # 查找用戶菜單或首頁指示
+                            user_menu = await page.query_selector('[data-test-id="post-container"], .ProfileDropdown__Button')
+                            if user_menu:
+                                logger.info("✅ [Reddit] 檢測到登入成功（找到用戶菜單）")
+                                return True
+                        except:
+                            pass
                         return False
                         
                 except asyncio.TimeoutError as e:
