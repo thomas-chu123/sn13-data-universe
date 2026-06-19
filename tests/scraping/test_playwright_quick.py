@@ -17,8 +17,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 設置路徑
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 設置路徑 - 移動到項目根目錄
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from scraping.x.x_playwright_scraper import XPlaywrightScraper
 from scraping.reddit.reddit_playwright_scraper import RedditPlaywrightScraper
