@@ -114,7 +114,7 @@ class OnDemandRequest(BaseProtocol):
     keywords: List[str] = Field(
         default_factory=list,
         description="Keywords/hashtags to search for",
-        max_length=5
+        max_length=20
     )
 
     url: Optional[str] = Field(

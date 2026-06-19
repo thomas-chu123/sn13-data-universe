@@ -470,6 +470,15 @@ class Miner:
 
                 if rd_job.keywords:
                     keywords.extend(rd_job.keywords)
+                
+                # Enforce keywords limit for OnDemandRequest validation
+                # (subreddit counts as 1 keyword, plus additional search keywords)
+                if len(keywords) > 20:
+                    bt.logging.warning(
+                        f"Job {job_request.id}: keywords list has {len(keywords)} items, "
+                        f"truncating to 20 items to comply with OnDemandRequest validation"
+                    )
+                    keywords = keywords[:20]
 
             # process
             synapse_resp = await self.loop_poll_on_demand_active_jobs(
