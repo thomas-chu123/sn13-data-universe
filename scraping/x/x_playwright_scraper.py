@@ -28,7 +28,7 @@ class XPlaywrightScraper(Scraper):
     """使用 Playwright 的 X/Twitter Scraper - 完全免費，無需 API 密鑰"""
     
     TWITTER_URL = "https://twitter.com"
-    TIMEOUT = 30000  # 毫秒
+    TIMEOUT = 60000  # 毫秒 - 增加以應對網路延遲
     
     def __init__(self, auto_login: bool = True):
         self.playwright = None
@@ -88,26 +88,30 @@ class XPlaywrightScraper(Scraper):
             twitter_password = os.getenv('TWITTER_PASSWORD')
             
             if not twitter_username or not twitter_password:
-                logger.warning("未設置 TWITTER_USERNAME 或 TWITTER_PASSWORD，使用未登入模式")
+                logger.warning("⚠️ [X] 未設置 TWITTER_USERNAME 或 TWITTER_PASSWORD，使用未登入模式")
                 return
             
-            logger.info("嘗試自動登入 Twitter...")
+            logger.info(f"🔐 [X] 嘗試自動登入 Twitter ({twitter_username})...")
+            # 使用更長的超時時間以應對網路延遲
             success = await PlaywrightAuthHelper.login_twitter(
                 self.page,
                 twitter_username,
                 twitter_password,
-                timeout=self.TIMEOUT
+                timeout=120000  # 增加到 2 分鐘
             )
             
             if success:
                 self.is_logged_in = True
-                logger.info("✅ Twitter 自動登入成功")
+                logger.info("✅ [X] Twitter 自動登入成功 - 將使用已登入身份爬取")
             else:
-                logger.warning("⚠️ Twitter 自動登入失敗，繼續使用未登入模式")
+                logger.warning("⚠️ [X] Twitter 自動登入失敗，將繼續使用未登入模式")
                 
+        except asyncio.TimeoutError as e:
+            logger.warning(f"⚠️ [X] Twitter 登入超時 (超過 120 秒): {e}")
+            logger.warning("⚠️ [X] 將繼續使用未登入模式")
         except Exception as e:
-            logger.error(f"自動登入異常: {e}")
-            logger.warning("⚠️ 繼續使用未登入模式")
+            logger.error(f"❌ [X] 自動登入異常: {e}")
+            logger.warning("⚠️ [X] 將繼續使用未登入模式")
     
     async def _search_tweets(
         self,

@@ -27,7 +27,7 @@ class RedditPlaywrightScraper(Scraper):
     """使用 Playwright 的 Reddit Scraper - 完全免費，無需 OAuth"""
     
     REDDIT_URL = "https://www.reddit.com"
-    TIMEOUT = 30000  # 毫秒
+    TIMEOUT = 60000  # 毫秒 - 增加以應對網路延遲
     
     def __init__(self, auto_login: bool = True):
         self.playwright = None
@@ -84,26 +84,30 @@ class RedditPlaywrightScraper(Scraper):
             reddit_password = os.getenv('REDDIT_PASSWORD')
             
             if not reddit_username or not reddit_password:
-                logger.warning("未設置 REDDIT_USERNAME 或 REDDIT_PASSWORD，使用未登入模式")
+                logger.warning("⚠️ [Reddit] 未設置 REDDIT_USERNAME 或 REDDIT_PASSWORD，使用未登入模式")
                 return
             
-            logger.info("嘗試自動登入 Reddit...")
+            logger.info(f"🔐 [Reddit] 嘗試自動登入 Reddit ({reddit_username})...")
+            # 使用更長的超時時間以應對網路延遲
             success = await PlaywrightAuthHelper.login_reddit(
                 self.page,
                 reddit_username,
                 reddit_password,
-                timeout=self.TIMEOUT
+                timeout=120000  # 增加到 2 分鐘
             )
             
             if success:
                 self.is_logged_in = True
-                logger.info("✅ Reddit 自動登入成功")
+                logger.info("✅ [Reddit] Reddit 自動登入成功 - 將使用已登入身份爬取")
             else:
-                logger.warning("⚠️ Reddit 自動登入失敗，繼續使用未登入模式")
+                logger.warning("⚠️ [Reddit] Reddit 自動登入失敗，將繼續使用未登入模式")
                 
+        except asyncio.TimeoutError as e:
+            logger.warning(f"⚠️ [Reddit] Reddit 登入超時 (超過 120 秒): {e}")
+            logger.warning("⚠️ [Reddit] 將繼續使用未登入模式")
         except Exception as e:
-            logger.error(f"自動登入異常: {e}")
-            logger.warning("⚠️ 繼續使用未登入模式")
+            logger.error(f"❌ [Reddit] 自動登入異常: {e}")
+            logger.warning("⚠️ [Reddit] 將繼續使用未登入模式")
     
     async def _search_subreddit_posts(
         self,
