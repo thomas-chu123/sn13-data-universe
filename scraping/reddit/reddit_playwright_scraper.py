@@ -18,24 +18,9 @@ from common.data import DataEntity, DataSource, DataEntityBucket
 from common.protocol import KeywordMode
 from scraping.scraper import Scraper, ScraperId, ValidationResult
 from scraping.playwright_auth_helper import PlaywrightAuthHelper
+from scraping.reddit.model import RedditContent, RedditDataType, DELETED_USER
 
 logger = logging.getLogger(__name__)
-
-
-class RedditContent(DataEntity):
-    """Reddit 帖子/評論內容"""
-    
-    post_id: str
-    subreddit: str
-    username: str
-    title: str
-    text: str
-    url: Optional[str]
-    created_at: datetime
-    upvotes: int
-    downvotes: int
-    comments: int
-    is_nsfw: bool
     
 
 class RedditPlaywrightScraper(Scraper):
@@ -182,52 +167,44 @@ class RedditPlaywrightScraper(Scraper):
             if not title:
                 return None
             
-            # 提取帖子 ID
+            # 提取帖子 ID 和 URL
             post_link = await element.query_selector('a[slot="full-post-link"]')
             post_url = await post_link.get_attribute('href') if post_link else ""
             post_id = post_url.split('/')[4] if post_url else ""
             
+            if not post_id:
+                return None
+            
             # 提取用戶名
             author_elem = await element.query_selector('a[data-testid="post-author-link"]')
-            username = await author_elem.inner_text() if author_elem else "unknown"
+            username = await author_elem.inner_text() if author_elem else DELETED_USER
             
             # 提取帖子文本
             content_elem = await element.query_selector('[data-testid="post-content-root"]')
-            text = await content_elem.inner_text() if content_elem else ""
+            body = await content_elem.inner_text() if content_elem else ""
             
-            # 提取統計數據
-            score_elem = await element.query_selector('[aria-label*="upvote"]')
-            upvotes = 0
-            if score_elem:
-                label = await score_elem.get_attribute('aria-label')
-                if label and label.split()[0].isdigit():
-                    upvotes = int(label.split()[0])
+            # 構造完整 URL
+            if not post_url.startswith('http'):
+                post_url = f"https://reddit.com{post_url}"
             
-            # 提取評論數
-            comments_elem = await element.query_selector('[aria-label*="comments"]')
-            comments = 0
-            if comments_elem:
-                label = await comments_elem.get_attribute('aria-label')
-                if label and label.split()[0].isdigit():
-                    comments = int(label.split()[0])
+            # 確保 subreddit 有 r/ 前綴
+            community = f"r/{subreddit}" if not subreddit.startswith('r/') else subreddit
             
-            # 檢查 NSFW
-            is_nsfw = await element.query_selector('[data-nsfw="true"]') is not None
-            
+            # 創建 RedditContent - 使用標準欄位名
             return RedditContent(
-                post_id=post_id,
-                subreddit=subreddit,
-                username=username,
-                title=title,
-                text=text,
+                id=post_id,
                 url=post_url,
-                created_at=datetime.utcnow(),
-                upvotes=upvotes,
-                downvotes=0,  # Reddit 不公開downvotes
-                comments=comments,
-                is_nsfw=is_nsfw,
-                data_source=DataSource.REDDIT,
+                username=username,
+                communityName=community,
+                body=body,
+                createdAt=dt.datetime.utcnow(),
+                dataType=RedditDataType.POST,
+                title=title,
             )
+            
+        except Exception as e:
+            logger.warning(f"提取帖子數據失敗: {e}")
+            return None
             
         except Exception as e:
             logger.warning(f"提取帖子數據失敗: {e}")
@@ -251,7 +228,7 @@ class RedditPlaywrightScraper(Scraper):
                     continue
                 
                 # 驗證必要字段
-                if not entity.post_id or not entity.username or not entity.title:
+                if not entity.id or not entity.username or not entity.title:
                     results.append(ValidationResult(
                         is_valid=False,
                         reason="Missing required fields (id, username, or title)",
@@ -265,7 +242,7 @@ class RedditPlaywrightScraper(Scraper):
                 if is_valid:
                     # 計算驗證的內容大小
                     content_size = len(entity.title.encode('utf-8'))
-                    content_size += len(entity.text.encode('utf-8'))
+                    content_size += len(entity.body.encode('utf-8'))
                     content_size += len(entity.username.encode('utf-8'))
                     
                     results.append(ValidationResult(

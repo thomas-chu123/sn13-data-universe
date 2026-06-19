@@ -19,22 +19,9 @@ from common.data import DataEntity, DataSource, DataEntityBucket
 from common.protocol import KeywordMode
 from scraping.scraper import Scraper, ScraperId, ValidationResult
 from scraping.playwright_auth_helper import PlaywrightAuthHelper
+from scraping.x.model import XContent
 
 logger = logging.getLogger(__name__)
-
-
-class XContent(DataEntity):
-    """X/Twitter 推文內容"""
-    
-    tweet_id: str
-    username: str
-    text: str
-    created_at: datetime
-    likes: int
-    retweets: int
-    replies: int
-    hashtags: List[str]
-    urls: List[str]
     
 
 class XPlaywrightScraper(Scraper):
@@ -183,40 +170,36 @@ class XPlaywrightScraper(Scraper):
             if not text:
                 return None
             
-            # 提取用戶名
+            # 提取用戶名和 URL
             username_elem = await element.query_selector('a[href*="/"]')
             username = ""
+            url = ""
             if username_elem:
                 href = await username_elem.get_attribute('href')
-                username = href.split('/')[-1] if href else ""
+                if href:
+                    username = href.split('/')[-1] if href else ""
+                    url = f"https://twitter.com{href}"
+            
+            if not username:
+                return None
             
             # 提取推文 ID
             article_elem = element
             article_id = await article_elem.get_attribute('data-testid')
             tweet_id = article_id.split('-')[-1] if article_id else ""
             
-            # 提取統計數據
-            likes = await self._get_stat_count(element, 'Like')
-            retweets = await self._get_stat_count(element, 'Retweet')
-            replies = await self._get_stat_count(element, 'Reply')
-            
             # 提取主題標籤
             hashtags = self._extract_hashtags(text)
             
-            # 提取 URL
-            urls = self._extract_urls(text)
-            
+            # 創建 XContent - 使用標準欄位名
             return XContent(
-                tweet_id=tweet_id,
                 username=username,
                 text=text,
-                created_at=datetime.utcnow(),
-                likes=likes,
-                retweets=retweets,
-                replies=replies,
-                hashtags=hashtags,
-                urls=urls,
-                data_source=DataSource.X,
+                url=url or f"https://twitter.com/{username}/status/{tweet_id}",
+                timestamp=dt.datetime.utcnow(),
+                tweet_hashtags=hashtags,
+                media=None,
+                tweet_id=tweet_id,
             )
             
         except Exception as e:
@@ -282,7 +265,7 @@ class XPlaywrightScraper(Scraper):
                     # 計算驗證的內容大小
                     content_size = len(entity.text.encode('utf-8'))
                     content_size += len(entity.username.encode('utf-8'))
-                    content_size += sum(len(h.encode('utf-8')) for h in entity.hashtags)
+                    content_size += sum(len(h.encode('utf-8')) for h in entity.tweet_hashtags)
                     
                     results.append(ValidationResult(
                         is_valid=True,
