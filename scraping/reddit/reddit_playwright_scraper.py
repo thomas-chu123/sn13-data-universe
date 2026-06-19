@@ -113,44 +113,58 @@ class RedditPlaywrightScraper(Scraper):
     ) -> List[RedditContent]:
         """搜尋 Subreddit 中的帖子"""
         try:
+            logger.debug(f"🔍 [Reddit] 搜尋帖子: subreddit=r/{subreddit}, sort={sort}, max_results={max_results}")
             page = await self._get_page()
             
             # 構建 subreddit URL
             subreddit_url = f"{self.REDDIT_URL}/r/{subreddit}/{sort}"
             
-            logger.info(f"搜尋 r/{subreddit} ({sort})")
+            logger.debug(f"🌐 [Reddit] 導航到 URL: {subreddit_url}")
+            logger.info(f"🔍 [Reddit] 搜尋 r/{subreddit} ({sort})")
             await page.goto(subreddit_url, wait_until='networkidle', timeout=self.TIMEOUT)
+            logger.debug("✅ [Reddit] 頁面已加載")
             
             # 等待帖子加載
+            logger.debug("⏳ [Reddit] 等待帖子元素加載...")
             await page.wait_for_selector('[data-testid="post-container"]', timeout=10000)
+            logger.debug("✅ [Reddit] 帖子元素已加載")
             
             posts = []
             
             # 滾動頁面以加載更多帖子
-            for _ in range(max_results // 10 + 1):
+            logger.debug(f"📄 [Reddit] 開始提取帖子 (目標: {max_results})...")
+            for scroll_idx in range(max_results // 10 + 1):
                 # 提取當前可見的帖子
+                logger.debug(f"📄 [Reddit] 滾動 #{scroll_idx}: 查詢帖子元素...")
                 post_elements = await page.query_selector_all('[data-testid="post-container"]')
+                logger.debug(f"📄 [Reddit] 找到 {len(post_elements)} 個帖子元素")
                 
-                for element in post_elements:
+                for elem_idx, element in enumerate(post_elements):
                     if len(posts) >= max_results:
+                        logger.debug(f"🛑 [Reddit] 達到最大數量 ({max_results})")
                         break
                     
                     try:
+                        logger.debug(f"📝 [Reddit] 提取帖子 #{elem_idx}...")
                         post_data = await self._extract_post_data(element, subreddit)
                         if post_data:
                             posts.append(post_data)
+                            logger.debug(f"✅ [Reddit] 帖子已提取: {post_data.username} - {post_data.title[:50]}...")
+                        else:
+                            logger.debug(f"⏭️ [Reddit] 帖子為空，跳過")
                     except Exception as e:
-                        logger.warning(f"提取帖子失敗: {e}")
+                        logger.debug(f"⚠️ [Reddit] 提取帖子 #{elem_idx} 失敗: {e}")
                         continue
                 
                 if len(posts) >= max_results:
                     break
                 
                 # 滾動以加載更多
+                logger.debug(f"📄 [Reddit] 滾動頁面加載更多帖子...")
                 await page.evaluate('window.scrollBy(0, window.innerHeight)')
                 await asyncio.sleep(1)
             
-            logger.info(f"找到 {len(posts)} 個帖子")
+            logger.info(f"✅ [Reddit] 找到 {len(posts)} 個帖子 (目標: {max_results})")
             return posts[:max_results]
             
         except Exception as e:
@@ -160,28 +174,35 @@ class RedditPlaywrightScraper(Scraper):
     async def _extract_post_data(self, element, subreddit: str) -> Optional[RedditContent]:
         """從元素提取帖子數據"""
         try:
+            logger.debug("📄 [Reddit] 提取帖子數據...")
             # 提取帖子標題
             title_elem = await element.query_selector('h3')
             title = await title_elem.inner_text() if title_elem else ""
+            logger.debug(f"📝 [Reddit] 帖子標題長度: {len(title)}")
             
             if not title:
+                logger.debug("❌ [Reddit] 帖子標題為空，跳過")
                 return None
             
             # 提取帖子 ID 和 URL
             post_link = await element.query_selector('a[slot="full-post-link"]')
             post_url = await post_link.get_attribute('href') if post_link else ""
             post_id = post_url.split('/')[4] if post_url else ""
+            logger.debug(f"🆔 [Reddit] 帖子 ID: {post_id}")
             
             if not post_id:
+                logger.debug("❌ [Reddit] 未找到帖子 ID，跳過")
                 return None
             
             # 提取用戶名
             author_elem = await element.query_selector('a[data-testid="post-author-link"]')
             username = await author_elem.inner_text() if author_elem else DELETED_USER
+            logger.debug(f"👤 [Reddit] 用戶名: {username}")
             
             # 提取帖子文本
             content_elem = await element.query_selector('[data-testid="post-content-root"]')
             body = await content_elem.inner_text() if content_elem else ""
+            logger.debug(f"📝 [Reddit] 帖子內容長度: {len(body)}")
             
             # 構造完整 URL
             if not post_url.startswith('http'):
@@ -189,6 +210,7 @@ class RedditPlaywrightScraper(Scraper):
             
             # 確保 subreddit 有 r/ 前綴
             community = f"r/{subreddit}" if not subreddit.startswith('r/') else subreddit
+            logger.debug(f"✅ [Reddit] 帖子已提取: {username} in {community}")
             
             # 創建 RedditContent - 使用標準欄位名
             return RedditContent(
@@ -203,7 +225,7 @@ class RedditPlaywrightScraper(Scraper):
             )
             
         except Exception as e:
-            logger.warning(f"提取帖子數據失敗: {e}")
+            logger.debug(f"⚠️ [Reddit] 提取帖子數據異常: {e}")
             return None
             
         except Exception as e:
@@ -346,41 +368,51 @@ class RedditPlaywrightScraper(Scraper):
             limit: Maximum number of items to return
         """
         try:
+            logger.info(f"🚀 [Reddit] on_demand_scrape 啟動: subreddit={subreddit}, usernames={usernames}, keywords={keywords}, limit={limit}")
             all_posts = []
             
             # 爬取指定 subreddit
             if subreddit and subreddit != "all":
+                logger.debug(f"📍 [Reddit] 爬取 subreddit: r/{subreddit}")
                 posts = await self._search_subreddit_posts(
                     subreddit=subreddit.replace('r/', ''),
                     max_results=limit,
                 )
+                logger.debug(f"✅ [Reddit] Subreddit r/{subreddit} 獲得 {len(posts)} 個帖子")
                 all_posts.extend(posts)
+            
+            logger.debug(f"📊 [Reddit] 全部帖子: {len(all_posts)}，開始過濾...")
             
             # Filter by date range if provided
             if start_datetime or end_datetime:
+                logger.debug(f"📅 [Reddit] 過濾日期範圍: {start_datetime} - {end_datetime}")
                 filtered_posts = []
                 for post in all_posts:
-                    post_time = dt.datetime.fromisoformat(post.created_at.replace('Z', '+00:00'))
+                    post_time = post.createdAt  # 使用 createdAt 而不是 created_at
                     if start_datetime and post_time < start_datetime:
                         continue
                     if end_datetime and post_time > end_datetime:
                         continue
                     filtered_posts.append(post)
+                logger.debug(f"✅ [Reddit] 日期過濾後: {len(filtered_posts)} 個帖子")
                 all_posts = filtered_posts
             
             # Filter by username if provided
             if usernames:
+                logger.debug(f"👤 [Reddit] 過濾用戶: {usernames}")
                 filtered_posts = [
                     post for post in all_posts
                     if post.username in usernames
                 ]
+                logger.debug(f"✅ [Reddit] 用戶過濾後: {len(filtered_posts)} 個帖子")
                 all_posts = filtered_posts
             
             # Filter by keywords if provided
             if keywords:
+                logger.debug(f"🔑 [Reddit] 過濾關鍵字: {keywords}, mode={keyword_mode}")
                 filtered_posts = []
                 for post in all_posts:
-                    post_text = (post.title + " " + (post.text or "")).lower()
+                    post_text = (post.title + " " + (post.body or "")).lower()  # 使用 body 而不是 text
                     if keyword_mode == "all":
                         # AND logic - all keywords must be present
                         if all(kw.lower() in post_text for kw in keywords):
@@ -389,12 +421,15 @@ class RedditPlaywrightScraper(Scraper):
                         # OR logic - at least one keyword must be present
                         if any(kw.lower() in post_text for kw in keywords):
                             filtered_posts.append(post)
+                logger.debug(f"✅ [Reddit] 關鍵字過濾後: {len(filtered_posts)} 個帖子")
                 all_posts = filtered_posts
             
-            return all_posts[:limit]
+            result = all_posts[:limit]
+            logger.info(f"✅ [Reddit] on_demand_scrape 完成: {len(result)} 個帖子返回")
+            return result
             
         except Exception as e:
-            logger.error(f"按需爬取失敗: {e}")
+            logger.error(f"❌ [Reddit] on_demand_scrape 失敗: {e}")
             return []
         
         finally:
