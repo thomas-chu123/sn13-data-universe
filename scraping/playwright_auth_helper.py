@@ -44,6 +44,29 @@ class PlaywrightAuthHelper:
             await page.goto(PlaywrightAuthHelper.TWITTER_LOGIN_URL, wait_until='networkidle', timeout=timeout)
             logger.debug(f"✅ [Twitter] 登入頁面已加載")
             
+            # 關閉 Google 登入彈出窗口（如果存在）
+            logger.debug(f"🔍 [Twitter] 檢查是否有 Google 登入彈出窗口...")
+            try:
+                # 嘗試找到並關閉彈出窗口的關閉按鈕
+                close_buttons = await page.query_selector_all('button[aria-label*="Close"], button[aria-label*="關閉"], div[role="dialog"] button[type="button"]')
+                if close_buttons:
+                    # 嘗試按 Escape 鍵先
+                    logger.debug(f"⌨️ [Twitter] 按 Escape 鍵關閉彈出窗口...")
+                    await page.press('body', 'Escape')
+                    await asyncio.sleep(1)
+                    logger.debug(f"✅ [Twitter] Escape 鍵已按下")
+                
+                # 如果還有 Google 登入相關的 iframe，嘗試隱藏它
+                google_frames = await page.query_selector_all('iframe[title*="Google"]')
+                for frame in google_frames:
+                    logger.debug(f"🔍 [Twitter] 找到 Google iframe，嘗試隱藏...")
+                    await page.evaluate(f"() => {{ const elem = document.querySelector('iframe[title*=\"Google\"]'); if (elem) elem.style.display = 'none'; }}")
+                    logger.debug(f"✅ [Twitter] Google iframe 已隱藏")
+            except Exception as e:
+                logger.debug(f"ℹ️ [Twitter] 關閉彈出窗口失敗（可能不存在）: {e}")
+            
+            await asyncio.sleep(1)
+            
             # 等待用戶名輸入框（增加超時時間）
             logger.debug(f"⏳ [Twitter] 等待用戶名輸入框...")
             try:
