@@ -4,17 +4,21 @@ from common.data import DataSource
 from scraping.reddit.reddit_custom_scraper import RedditCustomScraper
 from scraping.reddit.reddit_json_scraper import RedditJsonScraper
 from scraping.reddit.reddit_mc_scraper import RedditMCScraper
+from scraping.reddit.reddit_playwright_scraper import RedditPlaywrightScraper
 from scraping.scraper import Scraper, ScraperId
 from scraping.x.microworlds_scraper import MicroworldsTwitterScraper
 from scraping.x.apidojo_scraper import ApiDojoTwitterScraper
 from scraping.x.quacker_url_scraper import QuackerUrlScraper
 from scraping.x.x_custom_scraper import XCustomScraper
+from scraping.x.x_playwright_scraper import XPlaywrightScraper
 
 
 DEFAULT_FACTORIES = {
     ScraperId.X_FLASH: MicroworldsTwitterScraper,
     ScraperId.X_CUSTOM: XCustomScraper,
+    ScraperId.X_PLAYWRIGHT: XPlaywrightScraper,
     ScraperId.REDDIT_CUSTOM: RedditCustomScraper,
+    ScraperId.REDDIT_PLAYWRIGHT: RedditPlaywrightScraper,
     ScraperId.REDDIT_JSON: RedditJsonScraper,
     ScraperId.REDDIT_MC: RedditMCScraper,
     ScraperId.X_MICROWORLDS: MicroworldsTwitterScraper,

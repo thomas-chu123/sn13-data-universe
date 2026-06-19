@@ -13,7 +13,9 @@ class ScraperId(str, Enum):
 
     X_FLASH = "X.flash"
     X_CUSTOM = "X.custom"
+    X_PLAYWRIGHT = "X.playwright"
     REDDIT_CUSTOM = "Reddit.custom"
+    REDDIT_PLAYWRIGHT = "Reddit.playwright"
     REDDIT_JSON = "Reddit.json"
     REDDIT_MC = "Reddit.mc"
     X_MICROWORLDS = "X.microworlds"
