@@ -175,8 +175,12 @@ class Miner:
         )
         bt.logging.success(f"Loaded scraping config: {scraping_config}.")
 
+        # Store scraper provider and config for on-demand scraping
+        self.scraper_provider = ScraperProvider()
+        self.scraping_config = scraping_config
+
         self.scraping_coordinator = ScraperCoordinator(
-            scraper_provider=ScraperProvider(),
+            scraper_provider=self.scraper_provider,
             miner_storage=self.storage,
             config=scraping_config,
         )
@@ -687,6 +691,37 @@ class Miner:
     ) -> float:
         return self.default_priority(synapse)
 
+    def _get_scraper_for_on_demand(self, source: DataSource) -> Scraper:
+        """
+        Get the scraper configured for on-demand requests based on DataSource.
+        Falls back to default scrapers if configuration is not available.
+        """
+        try:
+            # Try to find a scraper for this source in the configuration
+            if hasattr(self, 'scraping_config') and self.scraping_config:
+                for scraper_id in self.scraping_config.scraper_configs.keys():
+                    # Check if this scraper_id matches the source
+                    if source == DataSource.X:
+                        if 'X.' in str(scraper_id):  # X.playwright, X.custom, X.apidojo, etc.
+                            scraper = self.scraper_provider.get(scraper_id)
+                            bt.logging.info(f"Using configured scraper {scraper_id} for X on-demand requests")
+                            return scraper
+                    elif source == DataSource.REDDIT:
+                        if 'Reddit.' in str(scraper_id):  # Reddit.playwright, Reddit.json, etc.
+                            scraper = self.scraper_provider.get(scraper_id)
+                            bt.logging.info(f"Using configured scraper {scraper_id} for Reddit on-demand requests")
+                            return scraper
+        except Exception as e:
+            bt.logging.warning(f"Failed to get scraper from config: {e}. Falling back to defaults.")
+        
+        # Fallback to default scrapers
+        if source == DataSource.X:
+            bt.logging.info("Falling back to ApiDojoTwitterScraper for X on-demand requests")
+            return ApiDojoTwitterScraper()
+        else:
+            bt.logging.info("Falling back to RedditJsonScraper for Reddit on-demand requests")
+            return RedditJsonScraper()
+
     async def loop_poll_on_demand_active_jobs(
         self, synapse: OnDemandRequest, reraise_instead_of_return_empty: bool = False
     ) -> OnDemandRequest:
@@ -718,10 +753,11 @@ class Miner:
 
             bt.logging.info(f"Date range: {start_dt} to {end_dt}")
 
-            # For X source, use the standard scraper with on_demand_scrape
+            # Get the configured scraper for this data source
+            scraper = self._get_scraper_for_on_demand(synapse.source)
+
+            # Handle X/Twitter on-demand requests
             if synapse.source == DataSource.X:
-                # Initialize the standard scraper (now includes low-engagement posts)
-                scraper = ApiDojoTwitterScraper()
                 data_entities = await scraper.on_demand_scrape(
                     usernames=synapse.usernames,
                     keywords=synapse.keywords,
@@ -737,18 +773,9 @@ class Miner:
                     data_entities[: synapse.limit] if synapse.limit else data_entities
                 )
 
+            # Handle Reddit on-demand requests
             elif synapse.source == DataSource.REDDIT:
-                # Use RedditJsonScraper (no API keys required)
-                bt.logging.info("Using RedditJsonScraper (no API keys)")
-                scraper = RedditJsonScraper()
-
-                if not scraper:
-                    bt.logging.error(
-                        f"No scraper available for ID: {ScraperId.REDDIT_JSON}"
-                    )
-                    synapse.data = []
-                    return synapse
-
+                bt.logging.info(f"Using {scraper.__class__.__name__} for Reddit on-demand requests")
                 data = await scraper.on_demand_scrape(
                     usernames=synapse.usernames,
                     subreddit=synapse.keywords[0] if synapse.keywords else None,
