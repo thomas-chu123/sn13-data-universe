@@ -54,7 +54,7 @@ from dynamic_desirability.desirability_retrieval import run_retrieval_from_api
 from common.data import DataLabel, DataSource, DataEntity
 from common.protocol import OnDemandRequest
 from common.date_range import DateRange
-from scraping.scraper import ScrapeConfig, ScraperId
+from scraping.scraper import ScrapeConfig, ScraperId, Scraper
 
 from scraping.x.apidojo_scraper import ApiDojoTwitterScraper
 from scraping.reddit.reddit_custom_scraper import RedditCustomScraper
