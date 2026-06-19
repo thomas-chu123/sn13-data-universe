@@ -98,17 +98,59 @@ class PlaywrightAuthHelper:
                 # 等待頁面加載完成（增加超時時間）
                 logger.debug(f"⏳ [Twitter] 等待登入完成...")
                 try:
-                    await page.wait_for_url("https://twitter.com/home", timeout=60000)
-                    logger.info("✅ [Twitter] 登入成功 - 已導航到首頁")
-                    return True
-                except Exception as e:
-                    logger.warning(f"⚠️ [Twitter] 無法等待首頁加載: {e}，檢查當前 URL...")
+                    # 等待頁面穩定而不是等待特定 URL
+                    await page.wait_for_load_state('networkidle', timeout=60000)
+                    logger.debug("✅ [Twitter] 網路已穩定")
+                    
                     current_url = page.url
-                    if "twitter.com" in current_url and "login" not in current_url:
-                        logger.info(f"✅ [Twitter] 登入可能成功 - 當前 URL: {current_url}")
+                    logger.debug(f"📍 [Twitter] 當前 URL: {current_url}")
+                    
+                    # 檢查是否已登出登入頁面
+                    if "twitter.com" in current_url and ("login" not in current_url and "i/flow" not in current_url):
+                        logger.info(f"✅ [Twitter] 登入成功 - 已離開登入流程 (URL: {current_url})")
+                        
+                        # 等待一下，讓頁面完全加載
+                        await asyncio.sleep(2)
+                        
                         return True
                     else:
-                        logger.warning(f"❌ [Twitter] 仍在登入頁面: {current_url}")
+                        logger.warning(f"⚠️ [Twitter] 可能仍在登入流程: {current_url}")
+                        # 等待更久看看是否會導航
+                        await asyncio.sleep(5)
+                        current_url = page.url
+                        logger.debug(f"📍 [Twitter] 等待後 URL: {current_url}")
+                        
+                        if "twitter.com" in current_url and ("login" not in current_url and "i/flow" not in current_url):
+                            logger.info(f"✅ [Twitter] 登入成功 - URL: {current_url}")
+                            return True
+                        else:
+                            logger.warning(f"❌ [Twitter] 仍在登入頁面: {current_url}")
+                            return False
+                        
+                except asyncio.TimeoutError as e:
+                    logger.warning(f"⚠️ [Twitter] 頁面加載超時: {e}")
+                    current_url = page.url
+                    logger.info(f"📍 [Twitter] 當前 URL: {current_url}")
+                    
+                    # 即使超時，也檢查是否已離開登入頁面
+                    if "twitter.com" in current_url and ("login" not in current_url and "i/flow" not in current_url):
+                        logger.info(f"✅ [Twitter] 可能登入成功 - URL: {current_url}")
+                        return True
+                    else:
+                        logger.warning(f"❌ [Twitter] 仍在登入頁面")
+                        return False
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ [Twitter] 等待過程出錯: {e}")
+                    current_url = page.url
+                    logger.info(f"📍 [Twitter] 當前 URL: {current_url}")
+                    
+                    # 檢查是否已離開登入頁面
+                    if "twitter.com" in current_url and ("login" not in current_url and "i/flow" not in current_url):
+                        logger.info(f"✅ [Twitter] 可能登入成功 - URL: {current_url}")
+                        return True
+                    else:
+                        logger.warning(f"❌ [Twitter] 仍在登入頁面")
                         return False
             else:
                 logger.warning("⚠️ [Twitter] 找不到登入按鈕")
@@ -174,20 +216,53 @@ class PlaywrightAuthHelper:
                 logger.debug(f"✅ [Reddit] 點擊登入按鈕")
                 await login_button.click()
                 
-                # 等待登入完成（增加超時時間）
+                # 等待登入完成
                 logger.debug(f"⏳ [Reddit] 等待登入完成...")
                 try:
-                    await page.wait_for_url("https://www.reddit.com/", timeout=60000)
-                    logger.info("✅ [Reddit] 登入成功 - 已導航到首頁")
-                    return True
-                except Exception as e:
-                    logger.warning(f"⚠️ [Reddit] 無法等待首頁加載: {e}，檢查當前 URL...")
+                    # 等待導航離開登入頁面（URL 應該改變）
+                    # Reddit 登入後可能導航到首頁或直接返回前一頁
+                    await page.wait_for_load_state('networkidle', timeout=60000)
+                    logger.debug("✅ [Reddit] 網路已穩定")
+                    
                     current_url = page.url
-                    if "reddit.com" in current_url and "login" not in current_url:
-                        logger.info(f"✅ [Reddit] 登入可能成功 - 當前 URL: {current_url}")
+                    logger.debug(f"📍 [Reddit] 當前 URL: {current_url}")
+                    
+                    # 檢查是否已登出登入頁面
+                    if "login" not in current_url and "password" not in current_url:
+                        logger.info(f"✅ [Reddit] 登入成功 - 已離開登入頁面 (URL: {current_url})")
+                        
+                        # 等待一下，讓頁面完全加載
+                        await asyncio.sleep(2)
+                        
                         return True
                     else:
                         logger.warning(f"❌ [Reddit] 仍在登入頁面: {current_url}")
+                        return False
+                        
+                except asyncio.TimeoutError as e:
+                    logger.warning(f"⚠️ [Reddit] 頁面加載超時: {e}")
+                    current_url = page.url
+                    logger.info(f"📍 [Reddit] 當前 URL: {current_url}")
+                    
+                    # 即使超時，也檢查是否已離開登入頁面
+                    if "login" not in current_url and "password" not in current_url:
+                        logger.info(f"✅ [Reddit] 可能登入成功 - URL: {current_url}")
+                        return True
+                    else:
+                        logger.warning(f"❌ [Reddit] 仍在登入頁面")
+                        return False
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ [Reddit] 等待過程出錯: {e}")
+                    current_url = page.url
+                    logger.info(f"📍 [Reddit] 當前 URL: {current_url}")
+                    
+                    # 檢查是否已離開登入頁面
+                    if "login" not in current_url and "password" not in current_url:
+                        logger.info(f"✅ [Reddit] 可能登入成功 - URL: {current_url}")
+                        return True
+                    else:
+                        logger.warning(f"❌ [Reddit] 仍在登入頁面")
                         return False
             else:
                 logger.warning("⚠️ [Reddit] 找不到登入按鈕")
