@@ -41,31 +41,30 @@ async def test_x_playwright_basic():
             )
             logger.info("✅ 瀏覽器已啟動")
             
-            context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-            )
-            page = await context.new_page()
-            logger.info("✅ 頁面已建立")
-            
-            # 測試導航
-            logger.info("\n🌐 測試頁面導航...")
-            await page.goto("https://twitter.com/search", wait_until='networkidle', timeout=60000)
-            logger.info("✅ Twitter 首頁已加載")
-            
-            # 檢查頁面標題
-            title = await page.title()
-            logger.info(f"📄 頁面標題: {title}")
-            
-            # 關閉
-            await context.close()
-            await browser.close()
-            logger.info("\n✅ 測試完成 - X Playwright 基本功能正常")
-            return True
+            try:
+                context = await browser.new_context(
+                    user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+                )
+                page = await context.new_page()
+                logger.info("✅ 頁面已建立")
+                
+                # 測試導航
+                logger.info("\n🌐 測試頁面導航...")
+                await page.goto("https://twitter.com/search", wait_until='load', timeout=60000)
+                logger.info("✅ Twitter 搜尋頁面已加載")
+                
+                # 檢查頁面標題
+                title = await page.title()
+                logger.info(f"📄 頁面標題: {title}")
+                
+                await context.close()
+                logger.info("\n✅ 測試完成 - X Playwright 基本功能正常")
+                return True
+            finally:
+                await browser.close()
             
     except Exception as e:
         logger.error(f"❌ 測試失敗: {e}")
-        import traceback
-        traceback.print_exc()
         return False
 
 
@@ -88,31 +87,30 @@ async def test_reddit_playwright_basic():
             )
             logger.info("✅ 瀏覽器已啟動")
             
-            context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-            )
-            page = await context.new_page()
-            logger.info("✅ 頁面已建立")
-            
-            # 測試導航
-            logger.info("\n🌐 測試頁面導航...")
-            await page.goto("https://www.reddit.com/r/python/", wait_until='networkidle', timeout=60000)
-            logger.info("✅ Reddit r/python 已加載")
-            
-            # 檢查頁面標題
-            title = await page.title()
-            logger.info(f"📄 頁面標題: {title}")
-            
-            # 關閉
-            await context.close()
-            await browser.close()
-            logger.info("\n✅ 測試完成 - Reddit Playwright 基本功能正常")
-            return True
+            try:
+                context = await browser.new_context(
+                    user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+                )
+                page = await context.new_page()
+                logger.info("✅ 頁面已建立")
+                
+                # 測試導航
+                logger.info("\n🌐 測試頁面導航...")
+                await page.goto("https://www.reddit.com/r/python/", wait_until='load', timeout=60000)
+                logger.info("✅ Reddit r/python 已加載")
+                
+                # 檢查頁面標題
+                title = await page.title()
+                logger.info(f"📄 頁面標題: {title}")
+                
+                await context.close()
+                logger.info("\n✅ 測試完成 - Reddit Playwright 基本功能正常")
+                return True
+            finally:
+                await browser.close()
             
     except Exception as e:
         logger.error(f"❌ 測試失敗: {e}")
-        import traceback
-        traceback.print_exc()
         return False
 
 
