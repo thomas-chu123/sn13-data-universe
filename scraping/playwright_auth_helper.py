@@ -47,30 +47,54 @@ class PlaywrightAuthHelper:
             # 關閉 Google 登入彈出窗口（如果存在）
             logger.debug(f"🔍 [Twitter] 檢查是否有 Google 登入彈出窗口...")
             try:
-                # 嘗試找到並關閉彈出窗口的關閉按鈕
-                close_buttons = await page.query_selector_all('button[aria-label*="Close"], button[aria-label*="關閉"], div[role="dialog"] button[type="button"]')
-                if close_buttons:
-                    # 嘗試按 Escape 鍵先
-                    logger.debug(f"⌨️ [Twitter] 按 Escape 鍵關閉彈出窗口...")
+                # 查找並點擊 Google 彈出窗口的關閉按鈕（右上角的 X）
+                # 可能的選擇器：aria-label 包含 "Close" 或在 role="dialog" 內的關閉按鈕
+                close_button = await page.query_selector('div[role="dialog"] button[aria-label*="Close"]')
+                if close_button:
+                    logger.debug(f"✅ [Twitter] 找到 Google 彈出窗口的關閉按鈕，點擊...")
+                    await close_button.click()
+                    await asyncio.sleep(1)
+                    logger.debug(f"✅ [Twitter] Google 彈出窗口已關閉")
+                else:
+                    # 嘗試按 Escape 鍵
+                    logger.debug(f"⌨️ [Twitter] 未找到關閉按鈕，嘗試按 Escape 鍵...")
                     await page.press('body', 'Escape')
                     await asyncio.sleep(1)
                     logger.debug(f"✅ [Twitter] Escape 鍵已按下")
                 
-                # 如果還有 Google 登入相關的 iframe，嘗試隱藏它
-                google_frames = await page.query_selector_all('iframe[title*="Google"]')
-                for frame in google_frames:
-                    logger.debug(f"🔍 [Twitter] 找到 Google iframe，嘗試隱藏...")
-                    await page.evaluate(f"() => {{ const elem = document.querySelector('iframe[title*=\"Google\"]'); if (elem) elem.style.display = 'none'; }}")
-                    logger.debug(f"✅ [Twitter] Google iframe 已隱藏")
+                # 確保 iframe 不會干擾，隱藏 Google 相關的元素
+                try:
+                    await page.evaluate("""() => {
+                        // 移除或隱藏 Google iframe
+                        const googleFrames = document.querySelectorAll('iframe[src*="google"], iframe[title*="Google"]');
+                        googleFrames.forEach(frame => {
+                            frame.style.display = 'none';
+                            frame.remove();
+                        });
+                        
+                        // 移除或隱藏 Google 登入對話框
+                        const dialogs = document.querySelectorAll('div[role="dialog"]');
+                        dialogs.forEach(dialog => {
+                            const hasGoogle = dialog.textContent.includes('Google') || dialog.innerHTML.includes('Google');
+                            if (hasGoogle) {
+                                dialog.style.display = 'none';
+                                dialog.remove();
+                            }
+                        });
+                    }""")
+                    logger.debug(f"✅ [Twitter] Google 元素已隱藏/移除")
+                except Exception as e:
+                    logger.debug(f"ℹ️ [Twitter] JavaScript 清理失敗（可能不需要）: {e}")
+                
             except Exception as e:
-                logger.debug(f"ℹ️ [Twitter] 關閉彈出窗口失敗（可能不存在）: {e}")
+                logger.debug(f"ℹ️ [Twitter] 關閉 Google 彈出窗口失敗（可能不存在）: {e}")
             
             await asyncio.sleep(1)
             
             # 等待用戶名輸入框（增加超時時間）
             logger.debug(f"⏳ [Twitter] 等待用戶名輸入框...")
             try:
-                await page.wait_for_selector('input[autocomplete="username"]', timeout=20000)
+                await page.wait_for_selector('input[name="username_or_email"]', timeout=20000)
                 logger.debug(f"✅ [Twitter] 用戶名輸入框已就緒")
             except Exception as e:
                 logger.warning(f"⚠️ [Twitter] 用戶名輸入框未找到: {e}，嘗試其他選擇器...")
@@ -78,41 +102,40 @@ class PlaywrightAuthHelper:
             
             # 輸入用戶名
             logger.debug(f"📝 [Twitter] 輸入用戶名...")
-            await page.fill('input[autocomplete="username"]', username)
+            await page.fill('input[name="username_or_email"]', username)
             logger.debug(f"✅ [Twitter] 用戶名已輸入")
             
-            # 點擊下一步按鈕
-            logger.debug(f"🔘 [Twitter] 查找下一步按鈕...")
-            next_button = await page.query_selector('button:has-text("下一步")')
-            if not next_button:
-                next_button = await page.query_selector('button:has-text("Next")')
+            # 查找 Continue 按鈕（不再有 Next 按鈕）
+            logger.debug(f"🔘 [Twitter] 查找 Continue 按鈕...")
+            continue_button = await page.query_selector('button:has-text("Continue")')
             
-            if next_button:
-                logger.debug(f"✅ [Twitter] 點擊下一步")
-                await next_button.click()
+            if continue_button:
+                logger.debug(f"✅ [Twitter] 點擊 Continue 按鈕")
+                await continue_button.click()
                 await asyncio.sleep(3)  # 增加等待時間
-                logger.debug(f"✅ [Twitter] 下一步完成")
+                logger.debug(f"✅ [Twitter] Continue 完成")
             else:
-                logger.warning(f"⚠️ [Twitter] 找不到下一步按鈕，繼續...")
+                logger.warning(f"⚠️ [Twitter] 找不到 Continue 按鈕，嘗試直接輸入密碼...")
             
             # 輸入密碼（增加超時時間）
             logger.debug(f"⏳ [Twitter] 等待密碼輸入框...")
             try:
-                await page.wait_for_selector('input[autocomplete="current-password"]', timeout=20000)
+                await page.wait_for_selector('input[name="password"]', timeout=20000)
                 logger.debug(f"✅ [Twitter] 密碼輸入框已就緒")
             except Exception as e:
                 logger.warning(f"⚠️ [Twitter] 密碼輸入框未找到: {e}，嘗試其他選擇器...")
                 await asyncio.sleep(2)
             
             logger.debug(f"📝 [Twitter] 輸入密碼...")
-            await page.fill('input[autocomplete="current-password"]', password)
+            await page.fill('input[name="password"]', password)
             logger.debug(f"✅ [Twitter] 密碼已輸入")
             
             # 點擊登入按鈕
             logger.debug(f"🔘 [Twitter] 查找登入按鈕...")
-            login_button = await page.query_selector('button:has-text("登入")')
+            login_button = await page.query_selector('button:has-text("Log in")')
             if not login_button:
-                login_button = await page.query_selector('button:has-text("Log in")')
+                # 嘗試查找其他變體
+                login_button = await page.query_selector('button[type="submit"]')
             
             if login_button:
                 logger.debug(f"✅ [Twitter] 點擊登入按鈕")

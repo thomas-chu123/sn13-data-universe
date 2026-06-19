@@ -111,20 +111,26 @@ async def test_twitter_login_visual():
             # 檢查頁面上的按鈕
             logger.info("\n" + "=" * 80)
             logger.info("🔍 檢查頁面上的按鈕:")
-            logger.info("=" * 80)
             
             buttons = await page.query_selector_all('button')
             logger.info(f"找到 {len(buttons)} 個按鈕:")
             
-            for i, btn in enumerate(buttons[:5]):  # 只顯示前 5 個
+            for i, btn in enumerate(buttons):
                 btn_text = await btn.text_content()
                 btn_type = await btn.get_attribute('type')
                 aria_label = await btn.get_attribute('aria-label')
+                btn_id = await btn.get_attribute('id')
+                btn_class = await btn.get_attribute('class')
+                data_testid = await btn.get_attribute('data-testid')
                 
                 logger.info(f"\n  按鈕 {i+1}:")
                 logger.info(f"    text: {btn_text[:50] if btn_text else 'N/A'}")
                 logger.info(f"    type: {btn_type}")
                 logger.info(f"    aria-label: {aria_label}")
+                logger.info(f"    id: {btn_id}")
+                logger.info(f"    data-testid: {data_testid}")
+                if btn_class:
+                    logger.info(f"    class: {btn_class[:80]}")
             
             # 檢查表單
             logger.info("\n" + "=" * 80)
@@ -134,11 +140,40 @@ async def test_twitter_login_visual():
             forms = await page.query_selector_all('form')
             logger.info(f"找到 {len(forms)} 個表單")
             
+            # 嘗試更多按鈕選擇器
+            logger.info("\n" + "=" * 80)
+            logger.info("🔍 嘗試不同的按鈕選擇器:")
+            logger.info("=" * 80)
+            
+            button_selectors = [
+                'button:has-text("Continue")',
+                'button:has-text("Log in")',
+                'button:has-text("登入")',
+                'button[type="submit"]',
+                'button[aria-label*="Continue"]',
+                'button[aria-label*="Log"]',
+                'button[aria-label*="Submit"]',
+                'button[data-testid*="login"]',
+                'button[data-testid*="continue"]',
+            ]
+            
+            for selector in button_selectors:
+                try:
+                    btn = await page.query_selector(selector)
+                    if btn:
+                        btn_text = await btn.text_content()
+                        logger.info(f"✅ 找到: {selector} (text: {btn_text[:30]})")
+                    else:
+                        logger.debug(f"❌ 未找到: {selector}")
+                except Exception as e:
+                    logger.debug(f"❌ 錯誤查詢 {selector}: {e}")
+            
             # 獲取完整頁面內容（部分）
             logger.info("\n" + "=" * 80)
             logger.info("📄 頁面標題和基本信息:")
             logger.info("=" * 80)
-            logger.info(f"標題: {page.title()}")
+            page_title = await page.title()
+            logger.info(f"標題: {page_title}")
             logger.info(f"URL: {page.url}")
             
             # 等待用戶觀察
