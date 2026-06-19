@@ -14,9 +14,38 @@ logger = logging.getLogger(__name__)
 class PlaywrightAuthHelper:
     """Playwright 認證助手類"""
     
-    TWITTER_LOGIN_URL = "https://twitter.com/i/flow/login"
+    TWITTER_LOGIN_URL = "https://x.com/i/flow/login"
     REDDIT_LOGIN_URL = "https://www.reddit.com/login"
     
+    @staticmethod
+    async def _click_exact_button(page: Page, target_texts: list) -> bool:
+        """
+        精確匹配按鈕文字並點擊（完全匹配，避免 :has-text 的前綴匹配問題）
+        
+        Args:
+            page: Playwright Page 對象
+            target_texts: 目標按鈕文字列表（完全匹配）
+        
+        Returns:
+            是否成功找到並點擊
+        """
+        try:
+            buttons = await page.query_selector_all("button")
+            for btn in buttons:
+                try:
+                    text = (await btn.inner_text()).strip()
+                    if text in target_texts:
+                        logger.debug(f"✅ 找到按鈕: '{text}'，點擊...")
+                        await btn.click()
+                        return True
+                except Exception:
+                    continue
+            logger.debug(f"❌ 找不到按鈕: {target_texts}")
+            return False
+        except Exception as e:
+            logger.debug(f"❌ 查找按鈕時出錯: {e}")
+            return False
+
     @staticmethod
     async def login_twitter(
         page: Page,
@@ -25,7 +54,7 @@ class PlaywrightAuthHelper:
         timeout: int = 30000
     ) -> bool:
         """
-        使用 Playwright 登入 Twitter
+        使用 Playwright 登入 Twitter/X
         
         Args:
             page: Playwright Page 對象
@@ -40,167 +69,172 @@ class PlaywrightAuthHelper:
             logger.info(f"🔐 [Twitter] 開始登入 ({username})...")
             
             # 導航到登入頁面
-            logger.debug(f"🌐 [Twitter] 導航到登入頁面...")
+            logger.debug("🌐 [Twitter] 導航到登入頁面...")
             await page.goto(PlaywrightAuthHelper.TWITTER_LOGIN_URL, wait_until='networkidle', timeout=timeout)
-            logger.debug(f"✅ [Twitter] 登入頁面已加載")
+            await asyncio.sleep(3)
+            logger.debug(f"✅ [Twitter] 登入頁面已加載，URL: {page.url}")
             
             # 關閉 Google 登入彈出窗口（如果存在）
-            logger.debug(f"🔍 [Twitter] 檢查是否有 Google 登入彈出窗口...")
+            logger.debug("🔍 [Twitter] 檢查是否有 Google 登入彈出窗口...")
             try:
-                # 查找並點擊 Google 彈出窗口的關閉按鈕（右上角的 X）
-                # 可能的選擇器：aria-label 包含 "Close" 或在 role="dialog" 內的關閉按鈕
                 close_button = await page.query_selector('div[role="dialog"] button[aria-label*="Close"]')
                 if close_button:
-                    logger.debug(f"✅ [Twitter] 找到 Google 彈出窗口的關閉按鈕，點擊...")
                     await close_button.click()
                     await asyncio.sleep(1)
-                    logger.debug(f"✅ [Twitter] Google 彈出窗口已關閉")
+                    logger.debug("✅ [Twitter] Google 彈出窗口已關閉")
                 else:
-                    # 嘗試按 Escape 鍵
-                    logger.debug(f"⌨️ [Twitter] 未找到關閉按鈕，嘗試按 Escape 鍵...")
                     await page.press('body', 'Escape')
-                    await asyncio.sleep(1)
-                    logger.debug(f"✅ [Twitter] Escape 鍵已按下")
+                    await asyncio.sleep(0.5)
                 
-                # 確保 iframe 不會干擾，隱藏 Google 相關的元素
+                # 隱藏 Google 相關元素
                 try:
                     await page.evaluate("""() => {
-                        // 移除或隱藏 Google iframe
                         const googleFrames = document.querySelectorAll('iframe[src*="google"], iframe[title*="Google"]');
-                        googleFrames.forEach(frame => {
-                            frame.style.display = 'none';
-                            frame.remove();
-                        });
-                        
-                        // 移除或隱藏 Google 登入對話框
+                        googleFrames.forEach(frame => { frame.style.display = 'none'; frame.remove(); });
                         const dialogs = document.querySelectorAll('div[role="dialog"]');
                         dialogs.forEach(dialog => {
                             const hasGoogle = dialog.textContent.includes('Google') || dialog.innerHTML.includes('Google');
-                            if (hasGoogle) {
-                                dialog.style.display = 'none';
-                                dialog.remove();
-                            }
+                            if (hasGoogle) { dialog.style.display = 'none'; dialog.remove(); }
                         });
                     }""")
-                    logger.debug(f"✅ [Twitter] Google 元素已隱藏/移除")
                 except Exception as e:
                     logger.debug(f"ℹ️ [Twitter] JavaScript 清理失敗（可能不需要）: {e}")
-                
             except Exception as e:
                 logger.debug(f"ℹ️ [Twitter] 關閉 Google 彈出窗口失敗（可能不存在）: {e}")
             
-            await asyncio.sleep(1)
+            # 等待用戶名輸入框
+            logger.debug("⏳ [Twitter] 等待用戶名輸入框...")
+            username_input = None
+            for selector in [
+                'input[name="username_or_email"]',
+                'input[autocomplete="username"]',
+                'input[name="text"]',
+            ]:
+                try:
+                    await page.wait_for_selector(selector, timeout=10000)
+                    username_input = await page.query_selector(selector)
+                    if username_input:
+                        logger.debug(f"✅ [Twitter] 找到用戶名輸入框: {selector}")
+                        break
+                except Exception:
+                    continue
             
-            # 等待用戶名輸入框（增加超時時間）
-            logger.debug(f"⏳ [Twitter] 等待用戶名輸入框...")
-            try:
-                await page.wait_for_selector('input[name="username_or_email"]', timeout=20000)
-                logger.debug(f"✅ [Twitter] 用戶名輸入框已就緒")
-            except Exception as e:
-                logger.warning(f"⚠️ [Twitter] 用戶名輸入框未找到: {e}，嘗試其他選擇器...")
-                await asyncio.sleep(2)
+            if not username_input:
+                logger.warning("⚠️ [Twitter] 找不到用戶名輸入框")
+                return False
             
             # 輸入用戶名
-            logger.debug(f"📝 [Twitter] 輸入用戶名...")
-            await page.fill('input[name="username_or_email"]', username)
-            logger.debug(f"✅ [Twitter] 用戶名已輸入")
+            logger.debug("📝 [Twitter] 輸入用戶名...")
+            await username_input.click()
+            await username_input.fill(username)
+            await asyncio.sleep(1)
+            logger.debug("✅ [Twitter] 用戶名已輸入")
             
-            # 查找 Continue 按鈕（不再有 Next 按鈕）
-            logger.debug(f"🔘 [Twitter] 查找 Continue 按鈕...")
-            continue_button = await page.query_selector('button:has-text("Continue")')
+            # 精確點擊 Continue / Next 按鈕（避免匹配 "Continue with phone" 等）
+            logger.debug("🔘 [Twitter] 查找 Continue/Next 按鈕（精確匹配）...")
+            clicked = await PlaywrightAuthHelper._click_exact_button(
+                page, ["Continue", "Next", "下一步", "继续"]
+            )
             
-            if continue_button:
-                logger.debug(f"✅ [Twitter] 點擊 Continue 按鈕")
-                await continue_button.click()
-                await asyncio.sleep(3)  # 增加等待時間
-                logger.debug(f"✅ [Twitter] Continue 完成")
-            else:
-                logger.warning(f"⚠️ [Twitter] 找不到 Continue 按鈕，嘗試直接輸入密碼...")
+            if not clicked:
+                # 備用：嘗試 data-testid
+                btn = await page.query_selector('[data-testid="LoginForm_Login_Button"]')
+                if not btn:
+                    btn = await page.query_selector('button[type="submit"]')
+                if btn:
+                    logger.debug("✅ [Twitter] 備用方式找到 Continue 按鈕，點擊...")
+                    await btn.click()
+                    clicked = True
+                    
+            if not clicked:
+                logger.warning("⚠️ [Twitter] 找不到 Continue/Next 按鈕")
+                return False
             
-            # 輸入密碼（增加超時時間）
-            logger.debug(f"⏳ [Twitter] 等待密碼輸入框...")
-            try:
-                await page.wait_for_selector('input[name="password"]', timeout=20000)
-                logger.debug(f"✅ [Twitter] 密碼輸入框已就緒")
-            except Exception as e:
-                logger.warning(f"⚠️ [Twitter] 密碼輸入框未找到: {e}，嘗試其他選擇器...")
-                await asyncio.sleep(2)
+            await asyncio.sleep(3)
+            logger.debug(f"✅ [Twitter] Continue 後的 URL: {page.url}")
             
-            logger.debug(f"📝 [Twitter] 輸入密碼...")
-            await page.fill('input[name="password"]', password)
-            logger.debug(f"✅ [Twitter] 密碼已輸入")
-            
-            # 點擊登入按鈕
-            logger.debug(f"🔘 [Twitter] 查找登入按鈕...")
-            login_button = await page.query_selector('button:has-text("Log in")')
-            if not login_button:
-                # 嘗試查找其他變體
-                login_button = await page.query_selector('button[type="submit"]')
-            
-            if login_button:
-                logger.debug(f"✅ [Twitter] 點擊登入按鈕")
-                await login_button.click()
-                
-                # 等待頁面加載完成（增加超時時間）
-                logger.debug(f"⏳ [Twitter] 等待登入完成...")
+            # 等待密碼輸入框
+            logger.debug("⏳ [Twitter] 等待密碼輸入框...")
+            password_input = None
+            for selector in ['input[name="password"]', 'input[type="password"]']:
                 try:
-                    # 等待頁面穩定而不是等待特定 URL
-                    await page.wait_for_load_state('networkidle', timeout=60000)
-                    logger.debug("✅ [Twitter] 網路已穩定")
-                    
-                    current_url = page.url
-                    logger.debug(f"📍 [Twitter] 當前 URL: {current_url}")
-                    
-                    # 檢查是否已登出登入頁面
-                    if "twitter.com" in current_url and ("login" not in current_url and "i/flow" not in current_url):
-                        logger.info(f"✅ [Twitter] 登入成功 - 已離開登入流程 (URL: {current_url})")
-                        
-                        # 等待一下，讓頁面完全加載
-                        await asyncio.sleep(2)
-                        
-                        return True
-                    else:
-                        logger.warning(f"⚠️ [Twitter] 可能仍在登入流程: {current_url}")
-                        # 等待更久看看是否會導航
-                        await asyncio.sleep(5)
-                        current_url = page.url
-                        logger.debug(f"📍 [Twitter] 等待後 URL: {current_url}")
-                        
-                        if "twitter.com" in current_url and ("login" not in current_url and "i/flow" not in current_url):
-                            logger.info(f"✅ [Twitter] 登入成功 - URL: {current_url}")
-                            return True
-                        else:
-                            logger.warning(f"❌ [Twitter] 仍在登入頁面: {current_url}")
-                            return False
-                        
-                except asyncio.TimeoutError as e:
-                    logger.warning(f"⚠️ [Twitter] 頁面加載超時: {e}")
-                    current_url = page.url
-                    logger.info(f"📍 [Twitter] 當前 URL: {current_url}")
-                    
-                    # 即使超時，也檢查是否已離開登入頁面
-                    if "twitter.com" in current_url and ("login" not in current_url and "i/flow" not in current_url):
-                        logger.info(f"✅ [Twitter] 可能登入成功 - URL: {current_url}")
-                        return True
-                    else:
-                        logger.warning(f"❌ [Twitter] 仍在登入頁面")
-                        return False
-                        
-                except Exception as e:
-                    logger.warning(f"⚠️ [Twitter] 等待過程出錯: {e}")
-                    current_url = page.url
-                    logger.info(f"📍 [Twitter] 當前 URL: {current_url}")
-                    
-                    # 檢查是否已離開登入頁面
-                    if "twitter.com" in current_url and ("login" not in current_url and "i/flow" not in current_url):
-                        logger.info(f"✅ [Twitter] 可能登入成功 - URL: {current_url}")
-                        return True
-                    else:
-                        logger.warning(f"❌ [Twitter] 仍在登入頁面")
-                        return False
-            else:
+                    await page.wait_for_selector(selector, timeout=15000)
+                    password_input = await page.query_selector(selector)
+                    if password_input:
+                        logger.debug(f"✅ [Twitter] 找到密碼輸入框: {selector}")
+                        break
+                except Exception:
+                    continue
+            
+            if not password_input:
+                logger.warning("⚠️ [Twitter] 密碼輸入框未找到，可能出現了額外的驗證步驟")
+                # 列出當前頁面的 input
+                inputs = await page.query_selector_all("input")
+                for i, inp in enumerate(inputs):
+                    name = await inp.get_attribute("name")
+                    ph = await inp.get_attribute("placeholder")
+                    logger.debug(f"   Input {i}: name={name}, placeholder={ph}")
+                return False
+            
+            # 輸入密碼
+            logger.debug("📝 [Twitter] 輸入密碼...")
+            await password_input.click()
+            await password_input.fill(password)
+            await asyncio.sleep(1)
+            logger.debug("✅ [Twitter] 密碼已輸入")
+            
+            # 精確點擊登入按鈕
+            logger.debug("🔘 [Twitter] 查找登入按鈕（精確匹配）...")
+            # X 的登入按鈕文字可能是 "Log in"、"Log In"、"登入"
+            login_clicked = await PlaywrightAuthHelper._click_exact_button(
+                page, ["Log in", "Log In", "登入", "登录", "Sign in"]
+            )
+            
+            if not login_clicked:
+                # 備用方式
+                for selector in [
+                    '[data-testid="LoginForm_Login_Button"]',
+                    'button[type="submit"]',
+                ]:
+                    btn = await page.query_selector(selector)
+                    if btn:
+                        logger.debug(f"✅ [Twitter] 備用方式找到登入按鈕 ({selector})，點擊...")
+                        await btn.click()
+                        login_clicked = True
+                        break
+            
+            if not login_clicked:
                 logger.warning("⚠️ [Twitter] 找不到登入按鈕")
                 return False
+            
+            # 等待頁面加載完成
+            logger.debug("⏳ [Twitter] 等待登入完成...")
+            try:
+                await page.wait_for_load_state('networkidle', timeout=60000)
+            except Exception as e:
+                logger.debug(f"ℹ️ [Twitter] networkidle 等待結束（可能超時）: {e}")
+            
+            await asyncio.sleep(2)
+            current_url = page.url
+            logger.debug(f"📍 [Twitter] 登入後 URL: {current_url}")
+            
+            # 驗證登入成功：已離開 login/flow 頁面
+            login_flow_paths = ["/flow/login", "/i/flow/", "/jf/onboarding", "signup_phone", "i/flow"]
+            if not any(path in current_url for path in login_flow_paths):
+                logger.info(f"✅ [Twitter] 登入成功 - URL: {current_url}")
+                return True
+            
+            # 再等一下看看是否有延遲導航
+            await asyncio.sleep(5)
+            current_url = page.url
+            logger.debug(f"📍 [Twitter] 等待後 URL: {current_url}")
+            
+            if not any(path in current_url for path in login_flow_paths):
+                logger.info(f"✅ [Twitter] 登入成功 - URL: {current_url}")
+                return True
+            
+            logger.warning(f"❌ [Twitter] 登入失敗，仍在登入頁面: {current_url}")
+            return False
                 
         except Exception as e:
             logger.error(f"❌ [Twitter] 登入異常: {e}")
@@ -229,111 +263,91 @@ class PlaywrightAuthHelper:
             logger.info(f"🔐 [Reddit] 開始登入 ({username})...")
             
             # 導航到登入頁面
-            logger.debug(f"🌐 [Reddit] 導航到登入頁面...")
+            logger.debug("🌐 [Reddit] 導航到登入頁面...")
             await page.goto(PlaywrightAuthHelper.REDDIT_LOGIN_URL, wait_until='networkidle', timeout=timeout)
-            logger.debug(f"✅ [Reddit] 登入頁面已加載")
+            await asyncio.sleep(3)
+            logger.debug(f"✅ [Reddit] 登入頁面已加載，URL: {page.url}")
             
-            # 等待用戶名輸入框（增加超時時間）
-            logger.debug(f"⏳ [Reddit] 等待用戶名輸入框...")
+            # 等待用戶名輸入框
+            logger.debug("⏳ [Reddit] 等待用戶名輸入框...")
             try:
-                await page.wait_for_selector('input[name="username"]', timeout=20000)
-                logger.debug(f"✅ [Reddit] 用戶名輸入框已就緒")
+                await page.wait_for_selector('input[name="username"]', timeout=15000)
+                logger.debug("✅ [Reddit] 用戶名輸入框已就緒")
             except Exception as e:
-                logger.warning(f"⚠️ [Reddit] 用戶名輸入框未找到: {e}，嘗試其他選擇器...")
-                await asyncio.sleep(2)
+                logger.warning(f"⚠️ [Reddit] 用戶名輸入框未找到: {e}")
+                return False
             
-            # 輸入用戶名
-            logger.debug(f"📝 [Reddit] 輸入用戶名...")
+            # 輸入用戶名和密碼
+            logger.debug("📝 [Reddit] 輸入用戶名...")
             await page.fill('input[name="username"]', username)
-            logger.debug(f"✅ [Reddit] 用戶名已輸入")
+            logger.debug("✅ [Reddit] 用戶名已輸入")
             
-            # 輸入密碼
-            logger.debug(f"📝 [Reddit] 輸入密碼...")
+            logger.debug("📝 [Reddit] 輸入密碼...")
             await page.fill('input[name="password"]', password)
-            logger.debug(f"✅ [Reddit] 密碼已輸入")
+            logger.debug("✅ [Reddit] 密碼已輸入")
+            await asyncio.sleep(0.5)
             
-            # 點擊登入按鈕
-            logger.debug(f"🔘 [Reddit] 查找登入按鈕...")
-            login_button = await page.query_selector('button:has-text("Log in")')
-            if not login_button:
-                login_button = await page.query_selector('button[type="submit"]')
+            # 精確點擊登入按鈕（Reddit 按鈕文字為 "Log In" 或 "Log in"）
+            logger.debug("🔘 [Reddit] 查找登入按鈕（精確匹配）...")
+            login_clicked = await PlaywrightAuthHelper._click_exact_button(
+                page, ["Log In", "Log in", "登入", "登录"]
+            )
             
-            if login_button:
-                logger.debug(f"✅ [Reddit] 點擊登入按鈕")
-                await login_button.click()
-                
-                # 等待登入完成
-                logger.debug(f"⏳ [Reddit] 等待登入完成...")
-                try:
-                    # 先等待一下，讓 JavaScript 挑戰（js_challenge）可以執行
-                    await asyncio.sleep(3)
-                    logger.debug("✅ [Reddit] 已等待 JavaScript 挑戰時間")
-                    
-                    # 等待導航或頁面穩定（嘗試多個條件）
-                    # Reddit 可能會在 js_challenge 之後導航，或者頁面會更新
-                    try:
-                        await page.wait_for_load_state('networkidle', timeout=60000)
-                        logger.debug("✅ [Reddit] 網路已穩定")
-                    except:
-                        logger.warning("⚠️ [Reddit] 網路穩定超時，繼續檢查...")
-                        await asyncio.sleep(5)
-                    
-                    current_url = page.url
-                    logger.debug(f"📍 [Reddit] 當前 URL: {current_url}")
-                    
-                    # 檢查是否已登出登入頁面
-                    # 排除 js_challenge 和 solution 參數
-                    is_login_page = ("login" in current_url or "password" in current_url) and \
-                                   ("js_challenge" in current_url or not any(x in current_url for x in ["/?", "reddit.com/r/"]))
-                    
-                    if not is_login_page or "reddit.com/r/" in current_url or "/user/" in current_url:
-                        logger.info(f"✅ [Reddit] 登入成功 - 已離開登入流程 (URL: {current_url})")
-                        
-                        # 等待一下，讓頁面完全加載
-                        await asyncio.sleep(2)
-                        
-                        return True
-                    else:
-                        logger.warning(f"❌ [Reddit] 仍在登入頁面: {current_url}")
-                        # 嘗試檢查是否有其他元素表明登入成功
-                        try:
-                            # 查找用戶菜單或首頁指示
-                            user_menu = await page.query_selector('[data-test-id="post-container"], .ProfileDropdown__Button')
-                            if user_menu:
-                                logger.info("✅ [Reddit] 檢測到登入成功（找到用戶菜單）")
-                                return True
-                        except:
-                            pass
-                        return False
-                        
-                except asyncio.TimeoutError as e:
-                    logger.warning(f"⚠️ [Reddit] 頁面加載超時: {e}")
-                    current_url = page.url
-                    logger.info(f"📍 [Reddit] 當前 URL: {current_url}")
-                    
-                    # 即使超時，也檢查是否已離開登入頁面
-                    if "login" not in current_url and "password" not in current_url:
-                        logger.info(f"✅ [Reddit] 可能登入成功 - URL: {current_url}")
-                        return True
-                    else:
-                        logger.warning(f"❌ [Reddit] 仍在登入頁面")
-                        return False
-                        
-                except Exception as e:
-                    logger.warning(f"⚠️ [Reddit] 等待過程出錯: {e}")
-                    current_url = page.url
-                    logger.info(f"📍 [Reddit] 當前 URL: {current_url}")
-                    
-                    # 檢查是否已離開登入頁面
-                    if "login" not in current_url and "password" not in current_url:
-                        logger.info(f"✅ [Reddit] 可能登入成功 - URL: {current_url}")
-                        return True
-                    else:
-                        logger.warning(f"❌ [Reddit] 仍在登入頁面")
-                        return False
-            else:
+            if not login_clicked:
+                # 備用方式
+                login_btn = await page.query_selector('button[type="submit"]')
+                if login_btn:
+                    logger.debug("✅ [Reddit] 備用方式找到登入按鈕，點擊...")
+                    await login_btn.click()
+                    login_clicked = True
+            
+            if not login_clicked:
                 logger.warning("⚠️ [Reddit] 找不到登入按鈕")
                 return False
+            
+            # 等待頁面跳轉（不強制等 networkidle，Reddit 的 js_challenge 可能導致超時）
+            logger.debug("⏳ [Reddit] 等待頁面跳轉...")
+            try:
+                await page.wait_for_load_state('networkidle', timeout=30000)
+                logger.debug("✅ [Reddit] 網路已穩定")
+            except Exception:
+                logger.debug("ℹ️ [Reddit] networkidle 超時，繼續檢查登入狀態...")
+                await asyncio.sleep(3)
+            
+            current_url = page.url
+            logger.debug(f"📍 [Reddit] 當前 URL: {current_url}")
+            
+            # 驗證登入成功：
+            # 方法1 - 用戶名和密碼 input 已從頁面消失（說明已離開登入表單）
+            username_input_still_visible = await page.query_selector('input[name="username"]')
+            password_input_still_visible = await page.query_selector('input[name="password"]')
+            
+            if not username_input_still_visible and not password_input_still_visible:
+                logger.info(f"✅ [Reddit] 登入成功 - 登入表單已消失 (URL: {current_url})")
+                await asyncio.sleep(1)
+                return True
+            
+            # 方法2 - URL 已不再是 /login 頁面路徑（排除 js_challenge 參數干擾）
+            from urllib.parse import urlparse
+            parsed = urlparse(current_url)
+            # 如果 path 不再是 /login，認為登入成功
+            if parsed.path not in ["/login", "/login/", "/account/login"]:
+                logger.info(f"✅ [Reddit] 登入成功 - 已離開登入頁面 (URL: {current_url})")
+                await asyncio.sleep(1)
+                return True
+            
+            # 方法3 - 等待更久並再次檢查
+            await asyncio.sleep(5)
+            current_url = page.url
+            parsed = urlparse(current_url)
+            username_input_still_visible = await page.query_selector('input[name="username"]')
+            
+            if parsed.path not in ["/login", "/login/", "/account/login"] or not username_input_still_visible:
+                logger.info(f"✅ [Reddit] 登入成功（延遲確認）- URL: {current_url}")
+                return True
+            
+            logger.warning(f"❌ [Reddit] 登入失敗，仍在登入頁面: {current_url}")
+            return False
                 
         except Exception as e:
             logger.error(f"❌ [Reddit] 登入異常: {e}")

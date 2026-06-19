@@ -70,7 +70,8 @@ class XPlaywrightScraper(Scraper):
             await self._initialize_browser()
             # 使用 new_context 設置 user-agent（正確的 Playwright API）
             context = await self.browser.new_context(
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0',
+                viewport={'width': 1280, 'height': 800},
             )
             self.page = await context.new_page()
             
