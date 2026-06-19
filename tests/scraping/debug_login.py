@@ -82,24 +82,50 @@ async def debug_x():
                     logger.info("点击 Next 后的 URL: %s", page.url)
                     
                     # 检查是否要求输入密码，或者有其它 verification
-                    # 密码框选择器: input[name="password"]
+                    # 先等密码框出现
+                    try:
+                        await page.wait_for_selector('input[name="password"]', timeout=10000)
+                    except Exception:
+                        pass
                     password_input = await page.query_selector('input[name="password"]')
+                    if not password_input:
+                        password_input = await page.query_selector('input[type="password"]')
                     if password_input:
                         logger.info("找到密码输入框，输入密码...")
+                        await password_input.click()
                         await password_input.fill(password)
+                        await page.wait_for_timeout(500)
                         await page.screenshot(path="x_step4_password_filled.png")
                         
-                        # 寻找登录按钮 "Log in"
+                        # 列出所有按钮以便诊断
                         login_btn = None
                         buttons = await page.query_selector_all("button")
+                        logger.info("密码填写后找到 %d 个 button:", len(buttons))
                         for btn in buttons:
-                            text = await btn.inner_text()
-                            if any(t in text for t in ["Log in", "登入", "登录"]):
+                            raw_text = await btn.inner_text()
+                            text = raw_text.strip()
+                            data_testid = await btn.get_attribute("data-testid")
+                            btn_type = await btn.get_attribute("type")
+                            logger.info("  Button raw=%r, testid=%s, type=%s", text, data_testid, btn_type)
+                            if text in ["Log in", "Log In", "登入", "登录", "Sign in"]:
                                 login_btn = btn
                                 break
+                        
                         if not login_btn:
-                            # 备用
-                            login_btn = await page.query_selector('button[data-testid="LoginForm_Login_Button"]')
+                            # 备用1: data-testid
+                            login_btn = await page.query_selector('[data-testid="LoginForm_Login_Button"]')
+                            if login_btn:
+                                logger.info("备用1: 通过 data-testid 找到登录按钮")
+                        if not login_btn:
+                            # 备用2: type=submit
+                            login_btn = await page.query_selector('button[type="submit"]')
+                            if login_btn:
+                                logger.info("备用2: 通过 type=submit 找到登录按钮")
+                        if not login_btn:
+                            # 备用3: aria-label
+                            login_btn = await page.query_selector('button[aria-label*="Log"]')
+                            if login_btn:
+                                logger.info("备用3: 通过 aria-label 找到登录按钮")
                             
                         if login_btn:
                             logger.info("点击登录按钮...")
@@ -109,6 +135,12 @@ async def debug_x():
                             logger.info("登录后的 URL: %s", page.url)
                         else:
                             logger.error("找不到登录按钮！")
+                            # 输出页面 HTML 片段以便诊断
+                            try:
+                                body_html = await page.evaluate("document.body.innerHTML")
+                                logger.info("页面 HTML 片段 (前2000字): %s", body_html[:2000])
+                            except Exception as html_err:
+                                logger.debug("获取 HTML 失败: %s", html_err)
                     else:
                         logger.warning("未找到密码输入框。可能需要输入手机号/邮箱验证 (Suspicious login challenge)？")
                         # 检查是否有其它输入框
@@ -194,10 +226,24 @@ async def debug_reddit():
                     await page.screenshot(path="reddit_step3_after_login.png")
                     logger.info("登录后的 URL: %s", page.url)
                     
-                    # 检查是否有错误提示
-                    error_div = await page.query_selector('[class*="error"]')
-                    if error_div:
-                        logger.warning("发现可能有错误提示: %s", await error_div.inner_text())
+                    # 检查是否有错误提示（用更精确的选择器，避免误报）
+                    error_selectors = [
+                        'p[class*="error"]:not([class*="-error"])',
+                        'span[class*="error-message"]',
+                        '[id*="error-message"]',
+                        '.error-message',
+                    ]
+                    found_real_error = False
+                    for err_sel in error_selectors:
+                        error_div = await page.query_selector(err_sel)
+                        if error_div:
+                            err_text = (await error_div.inner_text()).strip()
+                            if err_text:
+                                logger.warning("发现错误提示 (%s): %s", err_sel, err_text)
+                                found_real_error = True
+                                break
+                    if not found_real_error:
+                        logger.info("未发现明确错误提示")
                 else:
                     logger.error("找不到登录按钮！")
             else:
