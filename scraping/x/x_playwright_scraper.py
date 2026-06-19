@@ -14,8 +14,8 @@ from urllib.parse import quote
 from playwright.async_api import async_playwright, Page
 from bittensor.core.metagraph import Metagraph
 
-from common.data import DataEntity, DataSource, ValidationResult, DataEntityBucket
-from scraping.scraper import Scraper, ScraperId
+from common.data import DataEntity, DataSource, DataEntityBucket
+from scraping.scraper import Scraper, ScraperId, ValidationResult
 from scraping.playwright_auth_helper import PlaywrightAuthHelper
 
 logger = logging.getLogger(__name__)
